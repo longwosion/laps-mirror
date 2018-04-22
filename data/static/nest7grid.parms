@@ -1,0 +1,275 @@
+ &lapsparms_nl
+ c80_description='NOAA/ESRL Global Systems Division, Boulder CO (PARALLEL)'
+ iflag_lapsparms=1,              
+
+ c6_maproj='plrstr',                 
+ standard_latitude=40.0,        
+ standard_latitude2=90.0,        
+ standard_longitude=-105.5,       
+ grid_cen_lat=41.0,         
+ grid_cen_lon=-105.5,         
+ grid_spacing_m=3000.,          
+ NX_L=413,                         
+ NY_L=347,                         
+
+ vertical_grid='PRESSURE',
+ nk_laps=43,
+ earth_radius = 6370000.,                        
+
+ laps_cycle_time=3600,           
+ max_radar_files_nl=20000,
+ purge_time=1.5,
+
+ l_compress_radar=.true.,                  
+ l_use_tamdar=.false.,                  
+ I_PERIMETER=10,                  
+ c50_lowres_directory='NULL',
+
+ c_raddat_type='wsi',
+ radarext_3d='all',
+ radarext_3d_accum='xxx',
+ l_accum_fg=.false.,
+ l_accum_radar=.true.,
+ l_accum_gauge=.false.,
+ 
+ l_superob_barnes=.false.,
+ l_mosaic_sat=.true.,
+ l_fsf_gridgen=.false.,
+
+ path_to_topt30s='/data/lapb/projects/geog/world_topo_30s',
+ path_to_landuse30s='/data/lapb/projects/geog/landuse_30s',
+ path_to_soiltype_top30s='/data/lapb/projects/geog/soiltype_top_30s',
+ path_to_soiltype_bot30s='/data/lapb/projects/geog/soiltype_bot_30s',
+ path_to_greenfrac = '/unneeded/data/lapb/projects/geog/greenfrac_ncep',
+ path_to_soiltemp1deg  = '/unneeded/data/lapb/projects/geog/soiltemp_1deg',
+ path_to_albedo  = '/data/lapb/projects/geog/albedo_ncep',
+ path_to_maxsnoalb = '/unneeded/data/lapb/projects/geog/maxsnowalb',
+ path_to_islope = '/unneeded/data/lapb/projects/geog/islope',
+
+ path_to_raw_pirep='/public/data/pirep/netcdf/',
+ path_to_raw_rass='/public/data/profiler/rass/noaanet/netcdf/',
+ path_to_raw_profiler='/public/data/profiler/wind/noaanet/netcdf/',
+ path_to_raw_blprass='/public/data/profiler/rass/external/netcdf/',
+ path_to_raw_blpprofiler='/public/data/profiler/wind/external/netcdf/',
+ path_to_qc_acars='/public/data/acars/qc/netcdf/',
+ path_to_wisdom='/public/data/madis/LDAD/WISDOM/netCDF/',
+
+ iverbose=0,
+ i2_missing_data=-99,
+ r_missing_data=+1e37,
+ aod=0.05,
+ aero_scaleht=1500.,
+ fcterm = 0.060,
+ MAX_RADARS=13,        
+ I_OFFSET_RADAR=0,
+ ref_base=-10.,       
+ ref_base_useable=0., 
+ r_hybrid_first_gate=0.,
+ maxstns=100000,         
+ N_PIREP=10000,         
+ max_snd_grid=3000,
+ max_snd_levels=300,
+ redp_lvl=0.,
+ aircraft_time_window=0.5,     
+ vert_rad_meso=1,     
+ vert_rad_sao=1,      
+ vert_rad_pirep=1,    
+ vert_rad_prof=1,     
+ toptwvl_parm=2., 
+ iwrite_output=1,    
+ silavwt_parm=0.,
+ c8_project='NIMBUS', 
+ c8_blpfmt='default', 
+ fdda_model_source='lga','wrf-tom',
+ model_cycle_time=7200, 
+ model_fcst_intvl=3600, 
+ model_fcst_len=360,
+ /
+c OVERALL LAPS PARAMETERS
+c Many of these are stored in the common block in 'lapsparms.cmn'
+c
+c c6_maproj - map projection 'lambrt', 'plrstr', or 'merctr'
+c
+c NX_L - number of grid points in the horizontal direction
+c 
+c NY_L - number of grid points in the vertical direction
+c
+c vertical_grid - type of vertical grid coordinate
+c                 'PRESSURE' means constant pressure grid, uses pressures.nl
+c                 'SIGMA_P' means sigma pressure grid, uses sigmas.nl (under development)
+c                 'SIGMA_HT' means sigma height grid, uses heights.nl (under development)
+c
+c earth_radius - assumed spherical earth radius in meters
+c
+c laps_cycle_time - LAPS cycle time in seconds. This is the interval
+c                   between successive LAPS analyses and should correspond
+c                   to the interval between cron entries that run the
+c                   'sched.pl' script.
+c
+c purge_time - default retention time for files to use with the purger (days)
+c
+c path_to_soil_2m - this parameter is not yet active since we do not yet
+c                   supply the soil type database. It is there only for
+c                   software testing at this time.
+c
+c l_superob_barnes - use superobing routine for the 3-D wind and temperature 
+c                    analyses
+c
+c l_mosaic_sat - allow mosaicing of multiple satellite LVD inputs (under
+c                development)
+c
+c l_accum_fg - use first guess model info in the precip accumulation analysis
+c
+c l_accum_radar - use radar in the precip accumulation analysis
+c
+c l_accum_gauge - use rain gauges in the precip accumulation analysis 
+c                 (beyond point pair comparisons that are done regardless)
+c
+c l_compress_radar - Compress "vxx" radar files using run-length encoding.
+c                    Note that this is experimental and departs from the 
+c                    NetCDF file convention
+c
+c l_use_tamdar - Flag to decide to block the use of TAMDAR ACARS research data. 
+c                This flag functions only when the NIMBUS database is being 
+c                used. Operational TAMDAR is always allowed. For the WFO 
+c                database, the research & operational TAMDAR data are always 
+c                allowed through if they are available.
+c
+c c_raddat_type - selects type of NOWRAD radar data ('wsi', or 'wfo') used by 
+c                 the 'vrc_driver.x' program
+c
+c maxstns - max number of sfc stations you are likely to encounter in the
+c         - LSO file and various analyses, in and near the domain.
+c         - used in obs_driver.x, sfc_qc.exe, laps_sfc.x, and others?
+c
+c max_snd_grid - Total number of temperature profiles allowed
+c
+c max_snd_levels - Maximum number of temperature sounding levels allowed
+c
+c redp_lvl (Pressure reduction):  The main pressure analysis that LAPS
+c               produces is a reduction to this elevation (m).  For example,
+c               the Colorado LAPS uses 1500 m, about the elevation of
+c               Denver, since it is representative of the elevations in the 
+c               region of interest. In general this reference height should be 
+c               approximately equal to the mean elevation of stations reporting
+c               surface pressure (altimeter setting) or station pressure.
+c
+c radarext_3d - Determines input radar source for the cloud analysis.
+c               Intermediate files used are already on the LAPS grid.
+c               'all' first use 'vrz' 3D mosaic, then merge in 'lapsprd/vrc'
+c               'a01' first use 'v01' volume data, then merge in 'lapsprd/vrc'
+c               'v01' (radar #1  volume data)
+c               'v02' (radar #2  volume data)
+c               'vxx' (radar #xx volume data)
+c               'vrc' (2d radar data [e.g. NOWRAD, NEXRAD Lvl 3 narrowband])
+c
+c radarext_3d_accum - Determines input radar source for precip accum analysis.
+c                     Intermediate files used are already on the LAPS grid.
+c                     'xxx' Choose 'vrc' or 'all' automatically based on
+c                           availability and frequency of 'vrc/vrz'.
+c                     'vrc' (2d radar data in lapsprd directory [e.g. NOWRAD, 
+c                                                     NEXRAD Lvl 3, narrowband]  )
+c                     'vrz' (radar volume mosaic data)
+c                     'all' first use 'vrz', then merge in 'lapsprd/vrc'
+c                           at the times 'vrz' is present
+c                     'v01' (radar #1  volume data)
+c                     'v02' (radar #2  volume data)
+c                     'vxx' (radar #xx volume data)
+c                     'non' radar will not be used (i.e. is withheld)
+c
+c path_to_topt30s - Path to LAPS topography database.
+c                   If this contains the string 'wps', a WRF GEOGRID file can
+c                   instead be imported, provided it is on the same grid as
+c                   LAPS.
+c
+c path_to_raw_blpprofiler - Path to Boundary Layer wind profiler data. If 
+c                           data is Multi-Agency MADIS then use 'WFO' for 
+c                           'c8_project'.
+c
+c path_to_raw_blprass - Path to Boundary Layer RASS data. If data is 
+c                       Multi-Agency MADIS then use 'WFO' for 
+c                       'c8_project'.
+c
+c iverbose - amount of log file output (0,1)
+c
+c MAX_RADARS - Number of wideband radars being used. This can be set to
+c              0 if no radars are present to save computer memory 
+c              (particularly in the wind analysis) along with other 
+c              resources.
+c
+c aod - aerosol optical depth integrated through the column (treated as a
+c       constant over the horizontal domain)
+c
+c max_radar_files_nl - Maximum number of files expected in a radar directory
+c
+c ref_base - Reflectivity dbZ value assigned to areas with no echoes detected
+c            by a radar scan. Note that areas where the radar hasn't scanned 
+c            are normally given the more general missing value of 
+c            'r_missing_data', unless something like first guess information
+c            is being used to fill in.
+c
+c ref_base_useable - Threshold dbZ used to filter out low reflectivities 
+c                    thus acting as a ground clutter and noise filter.
+c                    Areas with reflectivities < 'ref_base_useable'
+c                    are generally reset to 'ref_base' (no echo 
+c                    value).
+c                      
+c r_hybrid_first_gate - Flag to mask out gates near the radar for low tilts to 
+c                       emulate what happens with the hybrid reflectivity scan.
+c                       Allowed values are 0.0 (flag off) or 1.0 (flag on).
+c
+c aircraft_time_window - Time window (half width) for accepting aircraft 
+c                        data in both the PIN file and in the analyses. 
+c                        Measured as a fraction of 'laps_cycle_time'.
+c
+c
+c fdda_model_source - Enter the forecast model if you'd like to use
+c                     one for 4DDA (as a substitute for lga/lgb input
+c                     to the analyses). Examples are 'mm5', 'eta', etc. 
+c                     This corresponds to the available 'lapsprd/fua/*'
+c                     subdirectories. Lapsplot will plot only among those
+c                     listed elements. The list of models (other than lga)
+c                     is used for reference during localization and 
+c                     verification. 'lga' is generally specified as the
+c                     first element and is ignored during the verification.
+c
+c model_cycle_time - Time between successive model initializations (seconds) 
+c
+c model_fcst_intvl - Time between model forecast steps within a given run (seconds)
+c
+c model_fcst_len - Total duration of model forecast (minutes)
+c
+c
+c iwrite_output - flag to write out all little files or just a restricted set
+c                 (1)  means write out all little files
+c                 (0)  means write out restricted set for single executable
+c                 (-1) means doesn't write out any little files
+c
+c TERRAIN SMOOTHING
+c           
+c toptwvl_parm: 
+c     As an example, 4. would represent 4 delta-x filtering of the terrain. You
+c     can change this to alter the smoothness of the terrain. Higher numbers 
+c     mean smoother terrain. Minimum value should be 2 since setting to 0
+c     would cause the run to fail. We generally use even numbers (e.g. 2., 4., 
+c     or 6.)
+c
+c silavwt_parm : 
+c     This parameter allows the potential use of silhouette terrain which is 
+c     the maximum elevation in the local area. Useful range is anywhere 
+c     between 0-1. A value of zero uses the average terrain instead of the 
+c     maximum. Note that a value of 1 may reduce the apparent effect of 
+c     filtering with 'toptwvl_parm'.
+c
+c c8_project - Depends on which "realization" of LAPS you are running.
+c              This sends information to various programs on things
+c              like file formats, filename conventions, etc. Most 
+c              references to 'c8_project' are in the ingest
+c              routines, though it also controls other specialized 
+c              functions for 'AIRDROP'. Allowed values are 'NIMBUS', 
+c              'WFO', 'AFWA', 'CWB', 'RSA', and 'AIRDROP'.
+c
+c c8_blpfmt - Specify the format of boundary layer profiler data
+c             If set to 'default' the software will key off of the
+c             value of 'c8_project'. Otherwise it can be
+c             explicitly set to 'MADIS' as an override.

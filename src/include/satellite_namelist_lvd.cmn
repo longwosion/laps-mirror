@@ -1,0 +1,7 @@
+      namelist /satellite_lvd_nl/
+     +nsats,ntypes,nchannel,
+     +csatid, csattypes,cchanneltypes,
+     +cpath2sat,
+     +l_cell_afwa,l_national,iskip_bilin,
+     +i_delta_sat_t_sec,i_msng_sat_flag,
+     +n_images

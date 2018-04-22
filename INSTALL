@@ -1,0 +1,10 @@
+Quick install instructions for the LAPS system.  Please refer to the
+document README in this directory for detailed information on
+installation and configuration.
+
+    $ zcat laps.tar.gz | tar xf -
+    $ cd laps
+    $ ./configure 
+    $ make; make install
+    $ perl ./etc/window_domain_rt.pl (see README 2.2.6.1 and related sections)
+

@@ -1,0 +1,812 @@
+#!@PERL@ -T
+# laps.cgi (script to display LAPS data)
+
+#for security
+#$ENV{'PATH'}="";
+
+#force flush of buffers after each print
+$| = 1; 
+#print "Content-type: text/html\n\n"; 
+
+#redirect stderr to stdout so we can see err msgs on the web BUT use
+#only for debugging - take it out when things are working
+open (STDERR, ">&STDOUT") || die "can't dup stdout ($!)\n";
+
+use Cwd 'chdir'; #from the camel book(387): "override chdir; keep PWD up to date"
+
+use lib "@prefix@/etc/www"; # Path for 'cgi-lib.pl'
+require "cgi-lib.pl";    # supplied in $LAPSINSTALLROOT/etc/www (formerly /w3/utilities)
+
+use lib "@prefix@/etc"; # Set this to your path for 'laps_tools.pm'
+require "laps_tools.pm";                 # supplied in $LAPSINSTALLROOT/etc
+
+##As per Bill's code, have form expire in 1 hour
+use HTTP::Date;
+$plusOneHour=time() + 3600;
+my $stringGMT = time2str($plusOneHour); 
+
+#print "Content-type: text/html\n".
+#      "Expires: $stringGMT\n\n";
+
+#get best return address
+$returnAddress = ($ENV{'REMOTE_HOST'} || $ENV{REMOTE_ADDR} ||
+                  "(Unknown requestor)");
+
+$default_title="ESRL/GSD/LAPS Data Display (Experimental)";
+###^^^^^^^^^^^^^^^^^^^^^
+
+# $web_root is where the '$web_root/domains/[list of domains]/private_data'
+# soft links (to each $LAPS_DATA_ROOT) should be set up
+$web_root = "/w3/lapb";
+
+# request_root is where the '$request_root/lapsplot/scratch' directory tree
+# should be set up
+$request_root = "$web_root/request";
+
+$filename = "$request_root/lapsplot/selected.in";
+open(FILE,$filename) or die "Can't open $filename.";
+@lines = <FILE>;
+close FILE;
+#print "lines in selected.in = @lines<br>";
+
+#Set default domains to be previous choices
+@domains = split(/ /,@lines[0]);
+foreach $domain (@domains) {
+    $domain =~ s/ //g;
+    chomp $domain;
+    $selected{$domain}="selected";
+}
+
+my $default_domain = @domains[0];
+chomp $default_domain;
+
+#Define laps_data_root
+my $DomainDir;
+$DomainDir = "$web_root/domains";
+my $laps_data_root;
+$laps_data_root = "$DomainDir/$default_domain/private_data";
+#print "laps_data_root = $laps_data_root<br>";
+
+#print " test output: Start of laps.cgi \n"; 
+
+#Read vertical grid type for this domain
+my $domain_nl = "nest7grid.parms";
+my $nl_var    = "vertical_grid";
+my (@vertical_grid_a,$vertical_grid);
+if(-e "$laps_data_root/static/$domain_nl"){
+    @vertical_grid_a=&laps_tools::get_nl_value($domain_nl,$nl_var,$laps_data_root);
+    $vertical_grid = @vertical_grid_a[0]; 
+}
+
+#Read pressure or sigma height levels for this domain
+if(-e "$laps_data_root/static/pressures.nl" && $vertical_grid eq "PRESSURE"){
+    @domain_levels=&laps_tools::get_pressures($laps_data_root);
+    @domain_levels = reverse @domain_levels;
+}elsif(-e "$laps_data_root/static/heights.nl" && $vertical_grid eq "SIGMA_HT"){
+    $domain_nl = "heights.nl";
+    $nl_var    = "heights";
+    @domain_levels=&laps_tools::get_nl_value($domain_nl,$nl_var,$laps_data_root);
+    @domain_levels = reverse @domain_levels;
+}
+
+#print " vertical_grid is $vertical_grid \n"; 
+
+my $num_pres = @domain_levels;
+my $pres_mb;
+
+#Read model choices for this domain
+$domain_nl = "nest7grid.parms";
+$nl_var    = "fdda_model_source_cmn";
+if(-e "$laps_data_root/static/$domain_nl"){
+    @domain_models=&laps_tools::get_nl_value($domain_nl,$nl_var,$laps_data_root);
+}
+my $num_models = @domain_models;
+my $preferred_model;
+
+if($num_models > 0){
+    $preferred_model = @domain_models[0];
+}else{
+    $preferred_model = "lga";
+}
+
+if($preferred_model eq "" || $preferred_model eq " " || $preferred_model eq " " || $preferred_model eq "   "){
+    $preferred_model = "lga";
+}
+
+#print "<br>num_models = $num_models";
+#print "<br>domain_models = @domain_models";
+#print "<br>preferred_model = $preferred_model";
+
+#Read model directories for this domain
+opendir LAPSPRD, "$laps_data_root/lapsprd/fsf";
+@modellist = readdir LAPSPRD;
+close LAPSPRD;
+@modellist = sort @modellist;
+#print "modellist = $laps_data_root @modellist<br>";
+
+my $default_time = @lines[4];
+$default_time =~ s/ //g;
+chomp $default_time;
+
+my $default_hhmm = @lines[5];
+$default_hhmm =~ s/ //g;
+chomp $default_hhmm;
+
+#print " test output: laps.cgi - open systime.dat\n"; 
+
+#Get the Day of Year (jjj) from the systime.dat
+my($jjj,$hh,$dd,$MMM,$yyyy,$time,$mm,$yy,$rtime,$yy,$hhmm);
+if(open(LAPSTIME,"$laps_data_root/time/systime.dat")){
+    my @lapstime = <LAPSTIME>;
+    close(LAPSTIME);
+
+    $lapstime[1] =~ /\d\d(\d\d\d)(\d\d)\d\d/;
+    $jjj = $1;
+    $hh=$2;
+    $lapstime[4] =~ /(\d\d*)-(\S\S\S)-(\d\d\d\d)/;
+    $dd = $1;
+    $MMM = $2;
+    $yyyy = $3;
+    $yy = $yyyy - int($yyyy/100)*100;
+    $yy = "0".$yy if(length($yy)<2);
+    $hhmm = "hhmm";
+
+}else{ # error on open
+    $yy = "yy";
+    $jjj = "ddd";
+    $hhmm = "hhmm";
+
+}
+
+#print " test output: laps.cgi - finished reading systime.dat\n"; 
+
+my $default_zoom = @lines[6];
+$default_zoom =~ s/ //g;
+chomp $default_zoom;
+
+my $default_xcen = @lines[7];
+$default_xcen =~ s/ //g;
+chomp $default_xcen;
+
+my $default_ycen = @lines[8];
+$default_ycen =~ s/ //g;
+chomp $default_ycen;
+
+my $default_density = @lines[9];
+$default_density =~ s/ //g;
+chomp $default_density;
+
+my $default_thickness = @lines[10];
+$default_thickness =~ s/ //g;
+chomp $default_thickness;
+
+my $default_npix = @lines[11];
+$default_npix =~ s/ //g;
+chomp $default_npix;
+
+my $default_frames = @lines[12];
+$default_frames =~ s/ //g;
+chomp $default_frames;
+my @frames_list;
+
+#print " | default_frames read in is $lines[12] @lines[12] $default_frames\n";
+
+my $default_delay = @lines[13];
+$default_delay =~ s/ //g;
+chomp $default_delay;
+
+$n_choices=8;
+
+&ReadParse(*default);
+$default_title=$default{'title'} ||
+    "ESRL/GSD/LAPS Data Display (Experimental)";
+
+#$default_density   = $default{'density'} || 1.0;
+$default_CenterLat = $default{'CenterLat'} || "  ";
+$default_CenterLon = $default{'CenterLon'} || -98.;
+#print " default_density = $default_density\n"; 
+
+#Set default sources to be previous choices
+@sources = split(/ /,@lines[1]);
+foreach $fsource (@sources) {
+    $fsource =~ s/ //g;
+    chomp $fsource;
+    $selected{$fsource}="selected";
+}
+
+#Set default fields to be previous choices
+@fields = split(/ /,@lines[2]);
+foreach $field (@fields) {
+    $field =~ s/ //g;
+    chomp $field;
+    $selected{$field}="selected";
+}
+
+#Set default pressure_levels to be previous choices from selected.in
+@pressure_levels = split(/ /,@lines[3]);
+foreach $pressure_level (@pressure_levels) {
+    $pressure_level =~ s/ //g;
+    chomp $pressure_level;
+    $selected{$pressure_level}="selected";
+}
+
+#print " test output: laps.cgi - read domains \n"; 
+
+opendir LAPSPRD, "$web_root/domains";
+@domainlist = readdir LAPSPRD;
+close LAPSPRD;
+@domainlist = sort @domainlist;
+
+#print " test output: laps.cgi - finished read domains \n"; 
+
+#print "@domainlist\n";
+
+@density_list[0] = "0.0000001";
+@density_list[1] = "0.000001";
+@density_list[2] = "0.00001";
+@density_list[3] = "0.0001";
+@density_list[4] = "0.001";
+@density_list[5] = "0.01";
+@density_list[6] = "0.10";
+@density_list[7] = "0.125";
+@density_list[8] = "0.25";
+@density_list[9] = "0.5";
+@density_list[10] = "1.0";
+@density_list[11] = "2.0";
+@density_list[12] = "4.0";
+@density_list[13] = "8.0";
+@density_list[14] = "10.";
+@density_list[15] = "100.";
+@density_list[16] = "1000.";
+@density_list[17] = "10000.";
+@density_list[18] = "100000.";
+@density_list[19] = "1000000.";
+#print "@density_list\n";
+
+@thickness_list[0] = "1";
+@thickness_list[1] = "2";
+@thickness_list[2] = "3";
+@thickness_list[3] = "4";
+@thickness_list[4] = "5";
+#print "@thickness_list\n";
+
+@frames_list[0] = "1";
+@frames_list[1] = "2";
+@frames_list[2] = "3";
+@frames_list[3] = "4";
+@frames_list[4] = "5";
+@frames_list[5] = "6";
+@frames_list[6] = "7";
+@frames_list[7] = "8";
+@frames_list[8] = "9";
+@frames_list[9] = "10";
+@frames_list[10] = "11";
+@frames_list[11] = "12";
+@frames_list[12] = "13";
+@frames_list[13] = "24";
+@frames_list[14] = "auto-2";
+@frames_list[15] = "auto-4";
+@frames_list[16] = "auto-6";
+@frames_list[17] = "auto-a";
+@frames_list[18] = "auto-f";
+@frames_list[19] = "auto-v";
+
+@delay_list[0] = "25";
+@delay_list[1] = "50";
+@delay_list[2] = "75";
+@delay_list[3] = "100";
+@delay_list[4] = "125";
+@delay_list[5] = "150";
+
+##Here's new stuff (sort of)------------------
+
+print <<"EOF";
+
+
+<FORM METHOD="post" ACTION="nph-laps.cgi">
+
+<!--<input type="submit" value="Send Request"><p>
+Use the shift or control(Apple) key (for PCs) or buttons 2 and 3 (for Unix) to 
+select multiple pressure levels.<br>
+-->
+<center>
+
+<table border=0 cellpadding=$n_choices>
+<tr>
+
+<td valign=top width=105>
+<strong>
+<A HREF="validtime.html">Valid Time:</A> 
+</strong>
+<br>
+[<FONT COLOR="#00AA00">$yy$jjj</FONT>$hhmm]
+<br>
+(blank=latest)
+
+<INPUT NAME="a9time" VALUE="$default_time" size=9>
+<br>
+<p>
+<strong><A HREF="fcst.html">Initial Time:</A></strong> 
+(blank=latest)
+<INPUT NAME="forecast_time" VALUE="$default_hhmm" size=9> 
+
+</td>
+
+
+<td valign=top>
+<strong>
+<A HREF="domains.html">Domain:</A>
+</strong>
+<br>
+
+
+<select name="domains" size=$n_choices multiple>
+EOF
+
+# display available domains
+  foreach $file (@domainlist) {
+ 
+#   print "$file ";
+
+    if($file ne "anal2d" && $file ne "fcst2d" && $file ne "t2" && $file ne "." && $file ne ".."){
+      if(-e "$DomainDir/$file/private_data/static/pressures.nl"){
+#      if($file eq $default_domain ) { 
+#          print "<option selected>$file\n"; 
+           print "<option $selected{$file}> $file\n";
+#      } else { 
+#          print "<option>$file\n"; 
+#      } 
+#        $selected{$file}="selected";
+#        print "<option $selected{$file}> $file\n";
+      }
+    }
+
+  }
+print <<"EOF";
+</select>
+
+
+
+</td>
+
+<td align="left" valign=top>
+<strong>
+<A HREF="sources.html">Source(s)</A>:
+</strong>
+<br>
+
+<select name="sources" size=$n_choices multiple>
+EOF
+
+$model = "bkgnd";
+my $asterisk = "*";
+
+if($preferred_model eq "lga"){
+    print "<option $selected{$model}> $model\n";  
+##YHL    print "*\n";
+}else{
+    print "<option $selected{$model}> $model\n";  
+}
+
+print <<"EOF";
+<option $selected{'analysis'}> analysis
+<option $selected{'balanced'}> balanced
+EOF
+
+foreach $model (@modellist) {
+    if($model ne "." && $model ne ".."){
+        if($model eq $preferred_model){
+            print "<option $selected{$model}> $model\n";  
+            print "*\n";
+        }elsif($model =~ "fua"){ # screen out more of the junk
+        }else{
+            print "<option $selected{$model}> $model\n";  
+        }
+    }
+}
+
+print <<"EOF";
+<option $selected{'DIFF'}> DIFF
+<option $selected{'diff'}> diff
+<option $selected{'DIFF_20'}> DIFF_20
+<option $selected{'DIFF_30'}> DIFF_30
+<option $selected{'DIFF_40'}> DIFF_40
+<option $selected{'obs'}> obs
+<option $selected{'obs_qc'}> obs_qc
+<option $selected{'what-got-in'}> what-got-in
+</select>
+</td>
+
+<td align="left" valign=top>
+<strong>
+<A HREF="fields.html">Field(s)</A>:
+</strong>
+<br>
+
+<valign=top>
+<select name="fields" size=8 multiple>
+<option $selected{'C_OMEGA'}> C_OMEGA
+<option $selected{'CAPE'}> CAPE
+<option $selected{'CIN'}> CIN
+<option $selected{'CLD_ALB'}> <FONT COLOR="#AA0000">CLD_ALB</FONT>
+<option $selected{'CLD_ALB1'}> CLD_ALB1
+<option $selected{'CLD_BASE'}> CLD_BASE
+<option $selected{'CLD_CEIL'}> CLD_CEIL
+<option $selected{'CLD_CND'}> CLD_CND
+<option $selected{'CLD_CVR'}> <FONT COLOR="#AA0000">CLD_CVR</FONT>
+<option $selected{'CLD_ICE'}> CLD_ICE
+<option $selected{'CLD_LIQ'}> CLD_LIQ
+<option $selected{'CLD_OD'}> CLD_OD
+<option $selected{'CLD_TOP'}> CLD_TOP
+<option $selected{'DEWPOINT'}> DEWPOINT
+<option $selected{'FIREWX'}> FIREWX
+<option $selected{'FIRE_FBG'}> FIRE_FBG
+<option $selected{'FIRE_VENT'}> FIRE_VENT
+<option $selected{'FIRE_HAINES'}> FIRE_HAINES
+<option $selected{'GG'}> GG
+<option $selected{'HEATINDEX'}> HEATINDEX
+<option $selected{'HELICITY'}> HELICITY
+<option $selected{'HT'}> HT
+<option $selected{'LAND_FRAC'}> LAND_FRAC
+<option $selected{'LE_FLUX'}> LE_FLUX
+<option $selected{'LONG_WAVE'}> LONG_WAVE
+<option $selected{'MCONV'}> MCONV
+<option $selected{'MR'}> MR
+<option $selected{'P_MSL'}> P_MSL
+<option $selected{'P_RED'}> P_RED
+<option $selected{'P_STN'}> P_STN
+<option $selected{'P_PRIME'}> P_PRIME
+<option $selected{'PCP_RAI'}> PCP_RAI
+<option $selected{'PCP_SNO'}> PCP_SNO
+<option $selected{'PCP_ICE'}> PCP_ICE
+<option $selected{'PCP_INC'}> PCP_INC
+<option $selected{'PCP_INT'}> PCP_INT
+<option $selected{'PCP_STO'}> PCP_STO
+<option $selected{'PCP_ST4'}> PCP_ST4
+<option $selected{'PRCP_H2O'}> PRCP_H2O
+<option $selected{'REF_ETOP'}> REF_ETOP
+<option $selected{'REF_MAX'}> REF_MAX
+<option $selected{'REFLCT'}>  REFLCT
+<option $selected{'RH'}> RH
+<option $selected{'RH3'}> RH3
+<option $selected{'SAT_11U'}> SAT_11U
+<option $selected{'SAT_12U'}> SAT_12U
+<option $selected{'SAT_WV'}>  SAT_WV
+<option $selected{'SAT_39U'}> SAT_39U
+<option $selected{'SAT_D39'}> SAT_D39
+<option $selected{'SAT_VIS'}> SAT_VIS
+<option $selected{'SAT_VIS_ALB'}> SAT_VIS_ALB
+<option $selected{'SAT_VIS_NRM'}> SAT_VIS_NRM
+<option $selected{'SE_FLUX'}> SE_FLUX
+<option $selected{'SFCT'}> SFCT
+<option $selected{'SH'}> SH
+<option $selected{'SNOW_INC'}> SNOW_INC
+<option $selected{'SNOW_STO'}> SNOW_STO
+<option $selected{'SNOW_CVR'}> SNOW_CVR
+<option $selected{'SNOW_DEPTH'}> SNOW_DEPTH
+<option $selected{'SW_DOWN'}> SW_DOWN
+<option $selected{'SW_OUT'}> SW_OUT
+<option $selected{'TEMP'}> TEMP
+<option $selected{'THETA'}> THETA
+<option $selected{'THETAE'}> THETAE
+<option $selected{'UMFLUX'}> UMFLUX
+<option $selected{'UPD_HEL'}> UPD_HEL
+<option $selected{'VISIBILITY'}> VISIBILITY
+<option $selected{'WETBULB'}> WETBULB
+<option $selected{'WIND_SPD'}> WIND_SPD
+<option $selected{'WIND_PWR'}> WIND_PWR
+<option $selected{'WIND_U'}> WIND_U
+<option $selected{'WIND_V'}> WIND_V
+<option $selected{'WIND_DIV'}> WIND_DIV
+<option $selected{'WIND_VORT'}> WIND_VORT
+<option $selected{'WIND_PVORT'}> WIND_PVORT
+<option $selected{'WIND_OMEGA'}> WIND_OMEGA
+<option $selected{'WTBLB0'}> WTBLB0
+<option $selected{'WTBLB1'}> WTBLB1
+<option $selected{'radial_vel'}> radial_vel
+<option $selected{'c_omega'}> c_omega
+<option $selected{'cape'}> cape
+<option $selected{'cin'}> cin
+<option $selected{'cld_base'}> cld_base
+<option $selected{'cld_ceil'}> cld_ceil
+<option $selected{'cld_cnd'}> cld_cnd
+<option $selected{'cld_cvr'}> cld_cvr
+<option $selected{'cld_ice'}> cld_ice
+<option $selected{'cld_liq'}> cld_liq
+<option $selected{'cld_od'}> cld_od
+<option $selected{'cld_top'}> cld_top
+<option $selected{'cld_type'}> cld_type
+<option $selected{'dewpoint'}> dewpoint
+<option $selected{'firewx'}> firewx
+<option $selected{'fire_fbg'}> fire_fbg
+<option $selected{'fire_vent'}> fire_vent
+<option $selected{'fire_haines'}> fire_haines
+<option $selected{'gg'}> gg
+<option $selected{'heatindex'}> heatindex
+<option $selected{'helicity'}> helicity
+<option $selected{'ht'}> ht
+<option $selected{'land_frac'}> land_frac
+<option $selected{'locations'}> locations
+<option $selected{'mconv'}> mconv
+<option $selected{'mr'}> mr
+<option $selected{'p_msl'}> p_msl
+<option $selected{'red_p'}> red_p
+<option $selected{'stn_p'}> stn_p
+<option $selected{'alt_p'}> alt_p
+<option $selected{'p_prime'}> p_prime
+<option $selected{'pcp_cnc'}> pcp_cnc
+<option $selected{'pcp_rai'}> pcp_rai
+<option $selected{'pcp_sno'}> pcp_sno
+<option $selected{'pcp_ice'}> pcp_ice
+<option $selected{'pcp_typ'}> pcp_typ
+<option $selected{'pcp_inc'}> pcp_inc
+<option $selected{'pcp_sto'}> pcp_sto
+<option $selected{'pcp_st4'}> pcp_st4
+<option $selected{'prcp_h2o'}> prcp_h2o
+<option $selected{'ref_max'}> ref_max
+<option $selected{'reflct'}> reflct
+<option $selected{'rh'}> rh
+<option $selected{'rh3'}> rh3
+<option $selected{'sat_11u'}> sat_11u
+<option $selected{'sat_wv'}>  sat_wv
+<option $selected{'sat_d39'}> sat_d39
+<option $selected{'sat_vis_alb'}> sat_vis_alb
+<option $selected{'sfct'}> sfct
+<option $selected{'sh'}> sh
+<option $selected{'snow_inc'}> snow_inc
+<option $selected{'snow_sto'}> snow_sto
+<option $selected{'snow_cvr'}> snow_cvr
+<option $selected{'sw_down'}> sw_down  
+<option $selected{'temp'}> temp
+<option $selected{'theta'}> theta
+<option $selected{'thetae'}> thetae
+<option $selected{'wind'}> wind
+<option $selected{'wind_spd'}> wind_spd
+<option $selected{'wind_spd_0-6'}> wind_spd_0-6
+<option $selected{'wind_u'}> wind_u
+<option $selected{'wind_v'}> wind_v
+<option $selected{'wind_div'}> wind_div
+<option $selected{'wind_vort'}> wind_vort
+<option $selected{'wind_pvort'}> wind_pvort
+<option $selected{'wind_vort_adv'}> wind_vort_adv
+<option $selected{'wind_omega'}> wind_omega
+<option $selected{'umflux'}> umflux
+<option $selected{'visibility'}> visibility
+<option $selected{'wetbulb'}> wetbulb
+<option $selected{'wtblb0'}> wtblb0
+<option $selected{'wtblb1'}> wtblb1
+</select>
+</td>
+EOF
+
+
+
+if ($num_pres > 0){ # New method of displaying pressure levels
+
+print <<"EOF";
+<td align="left" valign=top width=70>
+<strong>
+<A HREF="levels.html">Level(s):</A>
+</strong>
+<br>
+
+<select name="pressure_levels" size=$n_choices multiple>
+
+EOF
+
+#display available domain pressures
+foreach $file (@domain_levels) {
+    if($vertical_grid eq "PRESSURE"){
+        $pres_mb = $file / 100;
+    }else{
+        $pres_mb = int($file);
+    }
+    print "<option $selected{$pres_mb}> $pres_mb\n";
+}
+
+
+print <<"EOF";
+<option $selected{'0-6km'}> 0-6km
+<option $selected{'sfc/2d'}> sfc/2d
+<option $selected{'soil1'}> soil1
+<option $selected{'soil2'}> soil2
+<option $selected{'soil3'}> soil3
+<option $selected{'xsect'}> xsect
+<option $selected{'sndg'}> sndg
+<option $selected{'allsky'}> allsky
+</select>
+</td>
+EOF
+
+}else{ # Original method of displaying pressure levels
+
+print <<"EOF";
+<td align="left" valign=top>
+Level(s):
+</td>
+
+<td align="center">
+<select name="pressure_levels" size=$n_choices multiple>
+<option $selected{'200'}> 200
+<option $selected{'300'}> 300
+<option $selected{'400'}> 400
+<option $selected{'500'}> 500
+<option $selected{'600'}> 600
+<option $selected{'700'}> 700
+<option $selected{'800'}> 800
+<option $selected{'850'}> 850
+<option $selected{'900'}> 900
+<option $selected{'950'}> 950
+<option $selected{'975'}> 975
+<option $selected{'980'}> 980
+<option $selected{'985'}> 985
+<option $selected{'990'}> 990
+<option $selected{'995'}> 995
+<option $selected{'1000'}> 1000
+<option $selected{'1005'}> 1005
+<option $selected{'1010'}> 1010
+<option $selected{'1015'}> 1015
+<option $selected{'1020'}> 1020
+<option $selected{'1025'}> 1025
+<option $selected{'sfc/2d'}> sfc/2d
+<option $selected{'xsect'}> xsect
+<option $selected{'sndg'}> sndg
+</select>
+</td>
+EOF
+
+}
+
+
+print <<"EOF";
+
+
+<td valign=top width=75>
+<A HREF="azim.html"> Zoom/Az</A>: <INPUT NAME="zoom" VALUE="$default_zoom" size=5>
+<br>
+<A HREF="xsect.html">X-coord&nbsp;</A>:&nbsp;<INPUT NAME="xcen" VALUE="$default_xcen" size=5>
+<br>
+<A HREF="ysect.html">Y-coord&nbsp;</A>:&nbsp;<INPUT NAME="ycen" VALUE="$default_ycen" size=5>
+<br>
+<A HREF="imgsize.html">ImageSize</A>: <INPUT NAME="npix" VALUE="$default_npix" size=5>  
+</td>
+
+
+<td valign=top>
+<input type="hidden" name="title" value="$default_title">
+
+<!--<p>-->
+<center>
+<strong>
+<input type="submit" value="Load" style="font-size: 0.9em;">
+<input type="reset" value="Clear" style="font-size: 0.9em;">
+</center>
+</strong>
+<br>
+
+<label style="color: blue;"> Density:</label>
+<br>
+<select name="density">
+EOF
+  #display available densities
+
+  foreach $density (@density_list) {
+
+    if($density == $default_density ) { print "<option selected>$density\n"; } 
+    else               { print "<option>$density\n"; } 
+
+  }
+
+print <<"EOF";
+</select>
+
+
+<br>
+<A HREF="thick.html">Thick/Size:</A>
+<br>
+
+<select name="thickness">
+EOF
+  #display available thicknesses
+
+  foreach $thickness (@thickness_list) {
+
+    if($thickness == $default_thickness ) { print "<option selected>$thickness\n"; } 
+    else               { print "<option>$thickness\n"; } 
+
+  }
+
+print <<"EOF";
+</select>
+
+
+<br>
+<A HREF="frames.html"># Frames / Delay: </A>selected is $default_frames
+<br>
+
+<select name="frames">
+EOF
+
+# display available frame counts
+  foreach $frames (@frames_list) {
+
+    if($frames eq $default_frames ) { 
+#       print "option selected is $default_frames\n";
+        print "<option selected>$frames\n"; 
+    }else{ 
+        print "<option>$frames\n"; 
+    } 
+  }
+
+print <<"EOF";
+</select>
+
+<select name="delay">
+EOF
+  #display available frame counts
+
+  foreach $delay (@delay_list) {
+
+    if($delay == $default_delay ) { print "<option selected>$delay\n"; } 
+    else               { print "<option>$delay\n"; } 
+
+  }
+
+print <<"EOF";
+</select>
+
+</td>
+
+</tr>
+</table>
+<br>
+
+</FORM>
+
+<IMG SRC="colorbar.gif">
+
+<p>
+
+<SCRIPT language="javascript">
+function loop(title,image_dir,window_name) {
+var open_string='/looper/Looper.cgi?title='+title+'&image_dir='+image_dir;
+window.open(open_string,window_name,'width=1069,height=951,resizable');
+}
+</SCRIPT>
+
+<h4>
+<!--
+<A HREF="http://www.fsl.noaa.gov/fsl/docs/wthr/fsl-weather.html">FSL Wx</A>
+|
+-->
+<A HREF="http://esrl.noaa.gov/gsd/emb/">EMB Home</A>
+|
+<A HREF="http://laps.noaa.gov">LAPS</A>
+|
+<A HREF="/cgi/laps_products.cgi">
+Realtime LAPS Products</A>
+|
+<A HREF="/forecasts/laps_products.cgi">
+Forecasts</A>
+|
+<a href="javascript:loop('On-The-Fly','pub_onthefly')">
+Java Loop</A> <!--<FONT COLOR="#EE9900">(NEW)</FONT>-->
+|
+Log Info:
+<A HREF="lapsplot/lapsplot.in">
+Input</A>
+-
+<A HREF="lapsplot/lapsplot.out">
+Output</A>
+
+<p>
+<em>
+    Prepared by <a href="mailto:Steve.Albers\@noaa.gov">Steve Albers</a> 
+</em>
+<br>
+
+</center>  
+<p>
+</body>
+</html>
+EOF

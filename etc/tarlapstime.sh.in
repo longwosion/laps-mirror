@@ -1,0 +1,375 @@
+#!/bin/sh
+
+# For an hourly cycle a good time to run this would be 110 minutes later (at 50 after the hour)
+# with a MINAGE of 48 minutes and a MAXAGE of 112 minutes
+
+# First command line argument is the LAPS_DATA_ROOT
+
+# Second command line argument is the laps time in yydddhhmm format
+
+# Third command line argument is year (YYYY)
+
+# Fourth command line argument is month and date (MMDD)
+
+# Fifth command line argument is FILES [1=2D, 2=3D, 3=3D+LGA]           
+
+# Sixth argument is for expanded output and/or copy method [expand,noexpand,tar,rsync,scp,exchange,none]
+
+# Seventh argument is for including static files [static,nostatic]
+
+# Eighth argument is DOMAIN_NAME
+
+# Ninth argument is REMOTE_DATA_ROOT                                         
+
+umask 002
+
+LAPS_DATA_ROOT=$1
+time=$2
+YYYY=$3
+MMDD=$4
+FILES=$5
+EXPAND=$6
+STATIC=$7
+#MINAGE=$8
+#MAXAGE=$9
+DOMAIN_NAME=$8
+REMOTE_DATA_ROOT=$9
+
+echo "LAPS_DATA_ROOT = $LAPS_DATA_ROOT"
+echo "time = $time"
+echo "FILES = $FILES"
+echo "EXPAND = $EXPAND"
+echo "STATIC = $STATIC"
+echo "MINAGE = $MINAGE"
+echo "MAXAGE = $MAXAGE"
+
+LOGDIR=$LAPS_DATA_ROOT/log
+
+#Create list of lapsprd output files to be potentially tarred up for Web access
+echo " "
+echo "Create list of lapsprd output files to be potentially tarred up for Web access"
+
+MM=`echo $MMDD  | cut -c1-2`
+DD=`echo $MMDD  | cut -c3-4`
+
+HH=`echo $time  | cut -c6-7`
+HHMM=`echo $time  | cut -c6-9`
+YYDDDHH=`echo $time  | cut -c1-7`
+YYDDDHHMM=$time
+
+echo "Tarring up LAPS in $LAPS_DATA_ROOT for $time"
+
+cd $LAPS_DATA_ROOT
+
+LAPSTAR_TXT=$LOGDIR/lapstar.txt.$YYDDDHHMM
+LAPSTAR2_TXT=$LOGDIR/lapstar2.txt.$YYDDDHHMM
+LAPSTAR_WWW_TXT=$LOGDIR/lapstar_www.txt.$YYDDDHHMM
+
+touch $LAPSTAR_TXT
+
+#LAPS Data Files
+
+#Time directory
+echo $YYDDDHHMM                                                 > time/copyremotetime.dat
+echo "tarlapstime.sh"                                          >> time/copyremotetime.dat
+
+ls -1 time/systime.dat                                          > $LAPSTAR_TXT
+ls -1 time/c_time.dat                                          >> $LAPSTAR_TXT
+
+# Verification files                           
+#find ./lapsprd/verif -type f         ! -cmin +120         -print | grep -v cont | grep -v hist >> $LAPSTAR_TXT
+#find ./lapsprd/verif -type l         ! -cmin +120         -print | grep -v cont | grep -v hist >> $LAPSTAR_TXT
+#echo "log/load.png"                                                                            >> $LAPSTAR_TXT
+#echo "log/cloud_fcst.png"                                                                      >> $LAPSTAR_TXT
+
+# Pregenerated web analysis files
+find ./lapsprd/www/anal2d/archive/* -type f -name "$YYDDDHHMM.*"     -print   >> $LAPSTAR_TXT
+find ./lapsprd/www/anal2d/archive/* -type f -name "files.txt"        -print   >> $LAPSTAR_TXT
+find ./lapsprd/www/anal2d/recent/*  -type f -name "$YYDDDHHMM.*"     -print   >> $LAPSTAR_TXT
+find ./lapsprd/www/anal2d/recent    -type f -name "*$HHMM.gif"       -print   >> $LAPSTAR_TXT
+find ./lapsprd/www/anal2d/recent    -type f -name "gmeta*latest.gif" -print   >> $LAPSTAR_TXT
+
+# Lapsprd files (except LGA, LGB, FUA, FSF), high and low bandwidth options
+if test "$FILES" -ge 2; then
+    find ./lapsprd -type f -name "$YYDDDHHMM.*" -print | grep -v gr2 | grep -v www | grep -v "\.v[0-9][0-9]" | grep -v "\.d[0-9][0-9]"  >> $LAPSTAR_TXT
+else
+    for ext in lso snd hmg tmg prg pig lsx lst lmr liw lmt lcb lcv lh4 lil l1s lm2 gr2; do
+	echo "./lapsprd/$ext/$YYDDDHHMM.$ext"  >> $LAPSTAR_TXT     
+    done
+fi
+
+# LGA/LGB files (use MINAGE/MAXAGE?)
+if test "$FILES" = 3; then
+    echo "include lga/lgb files"
+#   find ./lapsprd/lg?     -name "*.lg?" ! -cmin +$MAXAGE -cmin +$MINAGE -print >> $LAPSTAR_TXT
+    for file in `ls ./lapsprd/lg?/*.lg?`; do
+        FILETIME=`echo $file | cut -c15-27`
+        VALIDTIME=`@PERL@ @prefix@/etc/timeconv.pl -a $FILETIME`
+        if test "$VALIDTIME" = $YYDDDHHMM; then
+            echo "checking valid time of $file $FILETIME $VALIDTIME $YYDDDHHMM match"
+            echo $file >> $LAPSTAR_TXT
+        else
+            echo "checking valid time of $file $FILETIME $VALIDTIME $YYDDDHHMM"
+        fi    
+    done
+fi
+
+# VXX files (pick closest ones to analysis time)
+if test "$FILES" -ge 2; then
+    YYDDDHHMM_M01=`@PERL@ @prefix@/etc/timeconv.pl -a $YYDDDHHMM -t -60`
+    YYDDDHHMM_M02=`@PERL@ @prefix@/etc/timeconv.pl -a $YYDDDHHMM -t -120`
+    YYDDDHHMM_M03=`@PERL@ @prefix@/etc/timeconv.pl -a $YYDDDHHMM -t -180`
+    YYDDDHHMM_M04=`@PERL@ @prefix@/etc/timeconv.pl -a $YYDDDHHMM -t -240`
+    YYDDDHHMM_M05=`@PERL@ @prefix@/etc/timeconv.pl -a $YYDDDHHMM -t -300`
+    YYDDDHHMM_M06=`@PERL@ @prefix@/etc/timeconv.pl -a $YYDDDHHMM -t -360`
+    YYDDDHHMM_M07=`@PERL@ @prefix@/etc/timeconv.pl -a $YYDDDHHMM -t -420`
+    YYDDDHHMM_M08=`@PERL@ @prefix@/etc/timeconv.pl -a $YYDDDHHMM -t -480`
+    YYDDDHHMM_M09=`@PERL@ @prefix@/etc/timeconv.pl -a $YYDDDHHMM -t -540`
+    YYDDDHHMM_M10=`@PERL@ @prefix@/etc/timeconv.pl -a $YYDDDHHMM -t -600`
+
+    YYDDDHHMM_P01=`@PERL@ @prefix@/etc/timeconv.pl -a $YYDDDHHMM -t +60`
+    YYDDDHHMM_P02=`@PERL@ @prefix@/etc/timeconv.pl -a $YYDDDHHMM -t +120`
+    YYDDDHHMM_P03=`@PERL@ @prefix@/etc/timeconv.pl -a $YYDDDHHMM -t +180`
+    YYDDDHHMM_P04=`@PERL@ @prefix@/etc/timeconv.pl -a $YYDDDHHMM -t +240`
+    YYDDDHHMM_P05=`@PERL@ @prefix@/etc/timeconv.pl -a $YYDDDHHMM -t +300`
+    YYDDDHHMM_P06=`@PERL@ @prefix@/etc/timeconv.pl -a $YYDDDHHMM -t +360`
+    YYDDDHHMM_P07=`@PERL@ @prefix@/etc/timeconv.pl -a $YYDDDHHMM -t +420`
+    YYDDDHHMM_P08=`@PERL@ @prefix@/etc/timeconv.pl -a $YYDDDHHMM -t +480`
+    YYDDDHHMM_P09=`@PERL@ @prefix@/etc/timeconv.pl -a $YYDDDHHMM -t +540`
+    YYDDDHHMM_P10=`@PERL@ @prefix@/etc/timeconv.pl -a $YYDDDHHMM -t +600`
+
+    for ext1 in v0 v1 v2 v3 v4 v5 v6 v7 v8 v9; do
+      for ext2 in 0 1 2 3 4 5 6 7 8 9; do
+        ext=$ext1$ext2
+        YYDDDHHM=`echo $YYDDDHHMM | cut -c1-8`
+        if test -e ./lapsprd/$ext/$YYDDDHHMM.$ext; then
+            echo "./lapsprd/$ext/$YYDDDHHMM.$ext"      >> $LAPSTAR_TXT     
+        elif test -e ./lapsprd/$ext/$YYDDDHHMM_M01.$ext; then
+            echo "./lapsprd/$ext/$YYDDDHHMM_M01.$ext"  >> $LAPSTAR_TXT     
+        elif test -e ./lapsprd/$ext/$YYDDDHHMM_P01.$ext; then
+            echo "./lapsprd/$ext/$YYDDDHHMM_P01.$ext"  >> $LAPSTAR_TXT     
+        elif test -e ./lapsprd/$ext/$YYDDDHHMM_M02.$ext; then
+            echo "./lapsprd/$ext/$YYDDDHHMM_M02.$ext"  >> $LAPSTAR_TXT     
+        elif test -e ./lapsprd/$ext/$YYDDDHHMM_P02.$ext; then
+            echo "./lapsprd/$ext/$YYDDDHHMM_P02.$ext"  >> $LAPSTAR_TXT     
+        elif test -e ./lapsprd/$ext/$YYDDDHHMM_M03.$ext; then
+            echo "./lapsprd/$ext/$YYDDDHHMM_M03.$ext"  >> $LAPSTAR_TXT     
+        elif test -e ./lapsprd/$ext/$YYDDDHHMM_P03.$ext; then
+            echo "./lapsprd/$ext/$YYDDDHHMM_P03.$ext"  >> $LAPSTAR_TXT     
+        elif test -e ./lapsprd/$ext/$YYDDDHHMM_M04.$ext; then
+            echo "./lapsprd/$ext/$YYDDDHHMM_M04.$ext"  >> $LAPSTAR_TXT     
+        elif test -e ./lapsprd/$ext/$YYDDDHHMM_P04.$ext; then
+            echo "./lapsprd/$ext/$YYDDDHHMM_P04.$ext"  >> $LAPSTAR_TXT     
+        elif test -e ./lapsprd/$ext/$YYDDDHHMM_M05.$ext; then
+            echo "./lapsprd/$ext/$YYDDDHHMM_M05.$ext"  >> $LAPSTAR_TXT     
+        elif test -e ./lapsprd/$ext/$YYDDDHHMM_P05.$ext; then
+            echo "./lapsprd/$ext/$YYDDDHHMM_P05.$ext"  >> $LAPSTAR_TXT     
+        elif test -e ./lapsprd/$ext/$YYDDDHHMM_M06.$ext; then
+            echo "./lapsprd/$ext/$YYDDDHHMM_M06.$ext"  >> $LAPSTAR_TXT     
+        elif test -e ./lapsprd/$ext/$YYDDDHHMM_P06.$ext; then
+            echo "./lapsprd/$ext/$YYDDDHHMM_P06.$ext"  >> $LAPSTAR_TXT     
+        elif test -e ./lapsprd/$ext/$YYDDDHHMM_M07.$ext; then
+            echo "./lapsprd/$ext/$YYDDDHHMM_M07.$ext"  >> $LAPSTAR_TXT     
+        elif test -e ./lapsprd/$ext/$YYDDDHHMM_P07.$ext; then
+            echo "./lapsprd/$ext/$YYDDDHHMM_P07.$ext"  >> $LAPSTAR_TXT     
+        elif test -e ./lapsprd/$ext/$YYDDDHHMM_M08.$ext; then
+            echo "./lapsprd/$ext/$YYDDDHHMM_M08.$ext"  >> $LAPSTAR_TXT     
+        elif test -e ./lapsprd/$ext/$YYDDDHHMM_P08.$ext; then
+            echo "./lapsprd/$ext/$YYDDDHHMM_P08.$ext"  >> $LAPSTAR_TXT     
+        elif test -e ./lapsprd/$ext/$YYDDDHHMM_M09.$ext; then
+            echo "./lapsprd/$ext/$YYDDDHHMM_M09.$ext"  >> $LAPSTAR_TXT     
+        elif test -e ./lapsprd/$ext/$YYDDDHHMM_P09.$ext; then
+            echo "./lapsprd/$ext/$YYDDDHHMM_P09.$ext"  >> $LAPSTAR_TXT     
+        elif test -e ./lapsprd/$ext/$YYDDDHHMM_M10.$ext; then
+            echo "./lapsprd/$ext/$YYDDDHHMM_M10.$ext"  >> $LAPSTAR_TXT     
+        elif test -e ./lapsprd/$ext/$YYDDDHHMM_P10.$ext; then
+            echo "./lapsprd/$ext/$YYDDDHHMM_P10.$ext"  >> $LAPSTAR_TXT     
+        fi
+      done
+    done
+fi # vxx for high bandwidth
+
+# Lapsprep files (use MINAGE/MAXAGE)
+#find  ./lapsprd/lapsprep    -name "LAPS:$YYYY-$MM-$DD\_$HH"      -print >> $LAPSTAR_TXT
+
+# Wgi files
+find ./log     -type f -name "*.wgi.$YYDDDHHMM" -print   >> $LAPSTAR_TXT
+
+# Sfc Verification file
+ls -1 log/qc/laps_sfc.ver.$HHMM                          >> $LAPSTAR_TXT
+
+# lapstar.txt file
+ls -1 log/lapstar.txt.$YYDDDHHMM                         >> $LAPSTAR_TXT
+
+# Solar Analysis Verification files
+ls -1 lapsprd/verif/SWI/pt/load.png                      >> $LAPSTAR_TXT
+ls -1rt lapsprd/verif/SWI/pt/$YYYY????.png lapsprd/verif/SWI/pt/$YYYY?????.png | tail -1 >> $LAPSTAR_TXT
+
+# Static files
+ls -1 static/*.nl                                        >> $LAPSTAR_TXT
+ls -1 static/nest7grid.parms                             >> $LAPSTAR_TXT
+ls -1 static/purger.dat                                  >> $LAPSTAR_TXT
+ls -1 static/Variable_Tables/*                           >> $LAPSTAR_TXT
+if test "$STATIC" = static; then                         
+    echo "including extra static/cdl files"
+    ls -1 static/static.nest7grid                        >> $LAPSTAR_TXT
+    ls -1 static/www/*.*                                 >> $LAPSTAR_TXT
+    ls -1 static/www/fcst2d/*                            >> $LAPSTAR_TXT
+    ls -1 cdl/fua.cdl                                    >> $LAPSTAR_TXT
+    ls -1 cdl/fsf.cdl                                    >> $LAPSTAR_TXT
+else
+    echo "not including extra static files"
+fi
+
+# Version file
+ls -1 version.localized                                  >> $LAPSTAR_TXT
+
+# Last file will denote this time is finished
+ls -1 time/copyremotetime.dat                            >> $LAPSTAR_TXT
+
+ls -l $LAPSTAR_TXT
+
+which tar
+
+date -u
+
+if test "$EXPAND" = noexpand; then
+    echo "current directory is `pwd`"
+    echo "making tar file $LAPS_DATA_ROOT/laps_$time.tar.gz"
+
+    echo "tar cvfz $LAPS_DATA_ROOT/laps_$time.tar.gz -T $LAPS_DATA_ROOT/$LAPSTAR_TXT"
+          tar cvfz $LAPS_DATA_ROOT/laps_$time.tar.gz -T $LAPS_DATA_ROOT/$LAPSTAR_TXT
+
+    ls -l $LAPS_DATA_ROOT/laps_$time.tar.gz
+
+elif test "$EXPAND" = expand; then
+    echo "cp to $LAPS_DATA_ROOT/lapstar_$YYDDDHH expanded directory"
+    rm -rf $LAPS_DATA_ROOT/lapstar_*
+    mkdir -p $LAPS_DATA_ROOT/lapstar_$YYDDDHH
+    tar -T $LAPSTAR_TXT -cf - | (cd $LAPS_DATA_ROOT/lapstar_$YYDDDHH;  tar xfBp -)
+    pwd
+
+elif test "$EXPAND" = scp; then
+    echo "scp to remote location (under construction)"  
+
+elif test "$EXPAND" = exchange; then
+    echo "call copy_remote with exchange_tarfilelist option"  
+
+    grep www       $LAPSTAR_TXT > $LAPSTAR_WWW_TXT # web archive plus recent
+    grep -v recent $LAPSTAR_TXT > $LAPSTAR2_TXT    # lapsprd plus web archive
+
+    echo " "
+    date -u
+    echo " "
+
+    echo "@prefix@/etc/copyremote.sh $LAPSTAR_WWW_TXT $REMOTE_DATA_ROOT exchange_tarfilelist"
+          @prefix@/etc/copyremote.sh $LAPSTAR_WWW_TXT $REMOTE_DATA_ROOT exchange_tarfilelist
+
+    echo " "
+    date -u
+    echo " "
+
+    echo "@prefix@/etc/copyremote.sh $LAPSTAR2_TXT    $REMOTE_DATA_ROOT exchange_tarfilelist"
+          @prefix@/etc/copyremote.sh $LAPSTAR2_TXT    $REMOTE_DATA_ROOT exchange_tarfilelist
+
+    echo " "
+    date -u
+    echo " "
+
+elif test "$EXPAND" = tar; then # tar is slower without compression and may be more reliable
+    echo "tar to remote location"  
+    cd $LAPS_DATA_ROOT 
+    pwd
+    echo "DOMAIN_NAME = "$DOMAIN_NAME
+    echo "REMOTE_DATA_ROOT = "$REMOTE_DATA_ROOT
+    echo 'tar -T $LAPSTAR_TXT -cvf - | ssh $DOMAIN_NAME "cd $REMOTE_DATA_ROOT; tar xpvf -"'
+          tar -T $LAPSTAR_TXT -cvf - | ssh $DOMAIN_NAME "cd $REMOTE_DATA_ROOT; tar xpvf -"
+
+elif test "$EXPAND" = rsync; then # rsync compression allows faster transmission
+    echo " "
+    date -u
+    echo " "
+    echo "rsync to remote location"  
+
+    grep www       $LAPSTAR_TXT > $LAPSTAR_WWW_TXT
+    grep -v recent $LAPSTAR_TXT > $LAPSTAR2_TXT
+
+    cd $LAPS_DATA_ROOT 
+    pwd
+    echo "DOMAIN_NAME = "$DOMAIN_NAME
+    echo "REMOTE_DATA_ROOT = "$REMOTE_DATA_ROOT
+    COLON=:            
+
+    echo "rsync -vvzlptg -e ssh --files-from=$LAPSTAR_WWW_TXT --timeout=200 --delay-updates $LAPS_DATA_ROOT $DOMAIN_NAME$COLON$REMOTE_DATA_ROOT"
+          rsync -vvzlptg -e ssh --files-from=$LAPSTAR_WWW_TXT --timeout=200 --delay-updates $LAPS_DATA_ROOT $DOMAIN_NAME$COLON$REMOTE_DATA_ROOT
+
+    echo " "
+    date -u
+    echo " "
+
+    echo "rsync -vvzlptg -e ssh --files-from=$LAPSTAR2_TXT --timeout=200 $LAPS_DATA_ROOT $DOMAIN_NAME$COLON$REMOTE_DATA_ROOT"
+          rsync -vvzlptg -e ssh --files-from=$LAPSTAR2_TXT --timeout=200 $LAPS_DATA_ROOT $DOMAIN_NAME$COLON$REMOTE_DATA_ROOT
+
+    echo " "
+    date -u
+    echo " "
+
+    echo "rsync -vvzlptg -e ssh --files-from=$LAPSTAR2_TXT --timeout=200 $LAPS_DATA_ROOT $DOMAIN_NAME$COLON$REMOTE_DATA_ROOT"
+          rsync -vvzlptg -e ssh --files-from=$LAPSTAR2_TXT --timeout=200 $LAPS_DATA_ROOT $DOMAIN_NAME$COLON$REMOTE_DATA_ROOT
+
+elif test "$EXPAND" = none; then 
+    echo "no remote copy, set up the two zip files just for possible MSS archiving"
+
+    grep www       $LAPSTAR_TXT > $LAPSTAR_WWW_TXT
+    grep -v recent $LAPSTAR_TXT > $LAPSTAR2_TXT
+ 
+    FILENAME=$LAPSTAR_WWW_TXT
+    TEMPFILE=$FILENAME.$$
+    echo  zip $TEMPFILE.z2 `cat $FILENAME`   
+          zip $TEMPFILE.z2 `cat $FILENAME`                                                                         
+    ls -l $TEMPFILE.z2
+
+    echo " "
+    date -u
+    echo " "
+
+    FILENAME=$LAPSTAR2_TXT
+    TEMPFILE=$FILENAME.$$
+    echo  zip $TEMPFILE.z2 `cat $FILENAME`   
+          zip $TEMPFILE.z2 `cat $FILENAME`                                                                         
+    ls -l $TEMPFILE.z2
+
+    echo " "
+    date -u
+    echo " "
+
+else # generic option
+    echo "call copy_remote with $EXPAND option"  
+
+    grep www       $LAPSTAR_TXT > $LAPSTAR_WWW_TXT
+    grep -v recent $LAPSTAR_TXT > $LAPSTAR2_TXT
+
+    echo " "
+    date -u
+    echo " "
+
+    echo "@prefix@/etc/copyremote.sh $LAPSTAR_WWW_TXT $REMOTE_DATA_ROOT $EXPAND"
+          @prefix@/etc/copyremote.sh $LAPSTAR_WWW_TXT $REMOTE_DATA_ROOT $EXPAND
+
+    echo " "
+    date -u
+    echo " "
+
+    echo "@prefix@/etc/copyremote.sh $LAPSTAR2_TXT    $REMOTE_DATA_ROOT $EXPAND"
+          @prefix@/etc/copyremote.sh $LAPSTAR2_TXT    $REMOTE_DATA_ROOT $EXPAND
+
+    echo " "
+    date -u
+    echo " "
+
+fi
+
+echo " "
+date -u
+    
+echo "finished tarlapstime.sh"

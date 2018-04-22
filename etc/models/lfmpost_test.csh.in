@@ -1,0 +1,225 @@
+#!@CSH@    
+
+# Usage examples:
+# lfmpost_test.csh $WRF_DATA_ROOT $LAPS_DATA_ROOT $RUN wrf-wsm6          # no ancillary operations          
+# lfmpost_test.csh $WRF_DATA_ROOT $LAPS_DATA_ROOT $RUN wrf-wsm6 mvoutput # move output from $WRF_DATA_ROOT to $LAPS_DATA_ROOT
+# lfmpost_test.csh $WRF_DATA_ROOT $LAPS_DATA_ROOT $RUN wrf-wsm6 cpstatic # copy static files from $LAPS_DATA_ROOT to 
+#                                                                        # $WRF_DATA_ROOT               
+# lfmpost_test.csh $WRF_DATA_ROOT $LAPS_DATA_ROOT $RUN wrf-wsm6 cpstatic mvoutput # copy static files and move output from 
+#                                                                        # $WRF_DATA_ROOT to $LAPS_DATA_ROOT
+
+# Edit mainly these lines
+#setenv WRF_DATA_ROOT /lfs0/projects/hmtb/dwr_domains/nmm-fer-gep4 # WRF directory                                
+setenv WRF_DATA_ROOT $1                                            # WRF data directory (external to $LAPS_DATA_ROOT,   
+                                                                   #                     or use dummy name if within
+                                                                   #                     the $LAPS_DATA_ROOT)
+setenv LAPSINSTALLROOT @prefix@
+setenv LAPS_DATA_ROOT  $2
+setenv RUN       $3                # Model Run Initial Time          
+setenv MODELNAME $4           
+setenv WRFDIR    $LAPS_DATA_ROOT/lapsprd/$MODELNAME                # WRF directory within $LAPS_DATA_ROOT
+setenv NEST      d01
+setenv MODEL     wrf
+
+setenv ADVPCP    0900
+setenv ADVCLD    0900
+
+# Number of forecast times (not including zero minute)
+setenv MAXTIMES  `perl $LAPSINSTALLROOT/etc/read_nl.pl -d $LAPS_DATA_ROOT -n nest7grid.parms -v n_fcst_steps`
+echo "MAXTIMES = $MAXTIMES"
+
+# Forecast interval in seconds
+setenv FCSTINTVL `perl $LAPSINSTALLROOT/etc/read_nl.pl -d $LAPS_DATA_ROOT -n nest7grid.parms -v model_fcst_intvl`
+echo "FCSTINTVL = $FCSTINTVL"
+
+setenv FUALAPS $LAPS_DATA_ROOT/lapsprd/fua/$MODELNAME   
+setenv FSFLAPS $LAPS_DATA_ROOT/lapsprd/fsf/$MODELNAME  
+
+echo " "
+echo "external WRF_DATA_ROOT is $WRF_DATA_ROOT"
+
+if (! -e $WRFDIR) then
+    echo "Setting up WRFDIR within LAPS_DATA_ROOT"
+    if (-e $WRF_DATA_ROOT) then
+        echo "ln -s $WRF_DATA_ROOT $WRFDIR"
+              ln -s $WRF_DATA_ROOT $WRFDIR
+    else
+        echo "mkdir -p $WRFDIR"
+              mkdir -p $WRFDIR
+    endif
+else
+    echo "WRFDIR (within LAPS_DATA_ROOT) - $WRFDIR already exists"
+endif
+
+echo " "
+
+echo "RUN = $RUN"
+
+echo "cleaning WRFDIR directory fua/fsf output for current model run $RUN and nest $NEST"
+rm -f $WRFDIR/$RUN/wrfprd/$NEST/f??/*.f??
+
+if ($5 == cpoutput || $6 == cpoutput) then
+    echo "cleaning $FUALAPS and $FSFLAPS"                                
+    rm -f $FUALAPS/*.fua                                                               
+    rm -f $FSFLAPS/*.fsf                                                               
+else if ($5 == mvoutput || $6 == mvoutput) then
+    echo "cleaning $FUALAPS and $FSFLAPS"                                
+    rm -f $FUALAPS/*.fua                                                               
+    rm -f $FSFLAPS/*.fsf                                                               
+endif
+
+echo " "
+
+# Set up directory structure and bring over the data
+mkdir -p $WRFDIR/$RUN/static
+mkdir -p $WRFDIR/static
+mkdir -p $WRFDIR/cdl
+
+setenv FUAWRF $WRFDIR/$RUN/wrfprd/$NEST/fua
+setenv FSFWRF $WRFDIR/$RUN/wrfprd/$NEST/fsf
+
+mkdir -p $FUAWRF
+mkdir -p $FSFWRF
+
+if ($5 != mvoutput && $6 != mvoutput && ! -e $FUAWRF && ! -e $FSFWRF) then
+    echo "Making soft links for FUA/FSF from LAPS to WRF"
+
+    if (! -e $FUALAPS) then
+        echo "ERROR: could not find $FUALAPS"
+        exit
+    endif
+    rm -f $FUAWRF/$MODELNAME
+    echo "ln -s $FUALAPS $FUAWRF"
+          ln -s $FUALAPS $FUAWRF
+
+    if (! -e $FSFLAPS) then
+        echo "ERROR: could not find $FSFLAPS"
+        exit
+    endif
+    rm -f $FSFWRF/$MODELNAME
+    echo "ln -s $FSFLAPS $FSFWRF"
+          ln -s $FSFLAPS $FSFWRF
+else
+    echo "Making FUA/FSF directories in WRF"
+    echo "mkdir -p $FUAWRF"
+          mkdir -p $FUAWRF
+    echo "mkdir -p $FSFWRF"
+          mkdir -p $FSFWRF
+endif
+
+setenv FCOUNT 0
+while ($FCOUNT <= $MAXTIMES)
+
+  if ($FCOUNT < 10) then
+    setenv FMM 0$FCOUNT  
+  else
+    setenv FMM $FCOUNT  
+  endif
+
+  setenv FCSTTIME_SEC `echo $FMM $FCSTINTVL     | awk '{print $1*$2}'`
+  setenv FCSTTIME_HR  `echo $FCSTTIME_SEC 3600. | awk '{print $1/$2}'`
+
+# setenv VTIME     $RUN$FMM              # Model Run Valid Time
+
+
+  echo "RUN = $RUN"
+  echo "FMM = $FMM"
+  echo "FCSTTIME_SEC = $FCSTTIME_SEC"
+
+  echo "FCSTTIME_HR = $FCSTTIME_HR"
+  setenv VTIME `perl $LAPSINSTALLROOT/etc/sched_sys.pl -A $RUN -d -$FCSTTIME_HR -f yyyymmddhhmm` 
+  echo "VTIME = $VTIME"
+
+# Parse Run Time
+  setenv RYY  `echo $RUN | cut -c3-4`
+  setenv RMON `echo $RUN | cut -c5-6`
+  setenv RDD  `echo $RUN | cut -c7-8`
+  setenv RHH  `echo $RUN | cut -c9-10`
+  setenv RMM  00                               
+
+# Parse Valid Time
+  setenv YY  `echo $VTIME | cut -c3-4`
+  setenv MON `echo $VTIME | cut -c5-6`
+  setenv DD  `echo $VTIME | cut -c7-8`
+  setenv HH  `echo $VTIME | cut -c9-10`
+  setenv MM  `echo $VTIME | cut -c11-12`
+
+  setenv USCORE _
+  setenv ENDPART_MM :$MM   
+  setenv ENDPART_SS :00   
+  setenv ENDPART $ENDPART_MM$ENDPART_SS
+  setenv CC 20
+
+  setenv WRFOUTFILE wrfout_$NEST$USCORE$CC$YY-$MON-$DD$USCORE$HH$ENDPART
+
+  if ($5 == scp) then
+#   scp jetscp.rdhpcs.noaa.gov:$WRF_DATA_ROOT/$RUN/wrfprd/wrfout"*"00:00:00 $WRFDIR/$RUN/wrfprd
+    scp jetscp.rdhpcs.noaa.gov:$WRF_DATA_ROOT/$RUN/wrfprd/$WRFOUTFILE       $WRFDIR/$RUN/wrfprd
+    scp jetscp.rdhpcs.noaa.gov:$WRF_DATA_ROOT/$RUN/wrfprd/d01_"*".pcp       $WRFDIR/$RUN/wrfprd
+    ##ln -s /scratch/staging/fab/jankov/* $WRFDIR/$RUN/wrfprd
+  endif
+
+  if ($5 == cpstatic) then
+    echo "Copying static files from $LAPS_DATA_ROOT to $WRFDIR"
+#   scp jetscp.rdhpcs.noaa.gov:/lfs0/projects/hmtb/dwr_domains/laps/$NEST/static/static.nest7grid    $WRFDIR/static
+    cp $LAPS_DATA_ROOT/static/lfmpost.nl          $WRFDIR/$RUN/static
+    cp $LAPS_DATA_ROOT/static/static.nest7grid    $WRFDIR/static
+    cp $LAPS_DATA_ROOT/static/*.nl                $WRFDIR/static
+    cp $LAPS_DATA_ROOT/static/*.parms             $WRFDIR/static
+    cp $LAPS_DATA_ROOT/static/corners.dat         $WRFDIR/static
+    cp $LAPS_DATA_ROOT/cdl/fua.cdl                $WRFDIR/cdl
+    cp $LAPS_DATA_ROOT/cdl/fsf.cdl                $WRFDIR/cdl
+#   ln -s $LAPS_DATA_ROOT/lapsprd                 $WRFDIR/lapsprd
+  endif
+
+  cd $WRFDIR/$RUN/wrfprd                                                       
+  echo "Contents of wrfprd directory..."
+  ls -l wrfout*
+  echo "Nominal WRFOUTFILE is $WRFOUTFILE"
+  setenv WRFOUT_PATTERN wrfout_$NEST$USCORE$CC$YY-$MON-$DD$USCORE$HH$ENDPART_MM
+  echo "WRFOUT_PATTERN is $WRFOUT_PATTERN"                                                    
+  echo "Actual WRFOUT file name is `ls -1 $WRFOUT_PATTERN*`"
+  setenv WRFOUT_SECONDS `ls -1 $WRFOUT_PATTERN*`                                                                 
+  if ( ! -e $WRFOUT_SECONDS )then
+      echo "ERROR: $WRFDIR/$RUN/wrfprd/$WRFOUTFILE not found"
+      exit
+  else
+      echo "Setting WRFOUTFILE to $WRFOUT_SECONDS"
+      setenv WRFOUTFILE $WRFOUT_SECONDS                                        
+      # exit # test
+  endif
+
+  echo   RCTIME `@PERL@ $LAPSINSTALLROOT/etc/systime.pl $RYY $RMON $RDD $RHH $RMM | head -1` 
+  setenv RCTIME `@PERL@ $LAPSINSTALLROOT/etc/systime.pl $RYY $RMON $RDD $RHH $RMM | head -1` 
+
+# Run the lfmpost executable and save the log file
+  cd $LAPSINSTALLROOT/bin
+
+  setenv LOGFILE $LAPS_DATA_ROOT/log/lfmpost_$RUN\_$FCSTTIME_SEC.log
+
+  echo  "./lfmpost.exe $MODEL $WRFDIR/$RUN/wrfprd/$WRFOUTFILE 1 $RCTIME $FCSTTIME_SEC $ADVCLD $ADVPCP $LAPS_DATA_ROOT" | tee $LOGFILE
+  echo  " " | tee -a $LOGFILE
+
+         ./lfmpost.exe $MODEL $WRFDIR/$RUN/wrfprd/$WRFOUTFILE 1 $RCTIME $FCSTTIME_SEC $ADVCLD $ADVPCP $LAPS_DATA_ROOT  | tee -a $LOGFILE
+
+  echo  " " | tee -a $LOGFILE
+
+  if ($5 == mvoutput || $6 == mvoutput) then
+    echo "moving output file $WRFDIR/$RUN/wrfprd/$NEST/fua/*.fua to $LAPS_DATA_ROOT"                      
+    mv $WRFDIR/$RUN/wrfprd/$NEST/fua/*.fua  $FUALAPS                                                     
+    echo "moving output file $WRFDIR/$RUN/wrfprd/$NEST/fsf/*.fsf to $LAPS_DATA_ROOT"                       
+    mv $WRFDIR/$RUN/wrfprd/$NEST/fsf/*.fsf  $FSFLAPS                                                   
+  endif
+
+  @ FCOUNT = $FCOUNT + 1
+
+  echo " "
+
+end # forecast time loop
+
+ls -l $WRFDIR/$RUN/wrfprd/$NEST/f??/*.f?? | tee -a $LOGFILE
+
+echo  " " | tee -a $LOGFILE                 
+
+echo "cp $WRFDIR/$RUN/wrfprd/$NEST/fua/*.fua  $FUALAPS" | tee -a $LOGFILE
+echo "cp $WRFDIR/$RUN/wrfprd/$NEST/fsf/*.fsf  $FSFLAPS" | tee -a $LOGFILE  

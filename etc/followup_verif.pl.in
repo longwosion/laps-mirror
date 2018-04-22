@@ -1,0 +1,466 @@
+#!@PERL@
+
+# Script to generate lapsplot gifs for forecast domain
+
+use lib "@prefix@/etc"; # Set this to your path for 'laps_tools.pm'
+require "laps_tools.pm";                 # supplied in $LAPSINSTALLROOT/etc
+
+require 5;
+use strict;
+
+# Setup command line options:
+#    -m model (e.g. wrf,arw,ensemble)
+#    -a model configuration (e.g. schultz,spaghetti)
+#    -d domain (e.g. dwr)
+#    -r laps dataroot
+#    -y delay time (hours) [optional]
+#    -f forecast output interval (hours) [optional]
+#    -c cycle frequency (hours) [optional]
+#    -l forecast length (hours) [optional]
+
+use vars qw($opt_a $opt_d $opt_r $opt_f $opt_c $opt_l $opt_m $opt_y $opt_t);
+use Getopt::Std;
+
+getopts('a:d:r:f:c:l:m:t:y:t:');
+
+print "Running followup_verif.pl...\n";
+system("uname -ns");
+print "user defined paths\n";
+print "model (from opt_m): $opt_m\n";
+print "model configuration (from opt_a): $opt_a\n";
+my $domain = $opt_d;
+my $modelname = "$opt_m-$opt_a";
+$ENV{LAPSINSTALLROOT}="@prefix@";
+my $dataroot = $opt_r;
+
+my @windowres;
+my $window;
+my $resolution;
+
+#my $fcstprd = "Radar_Comp";
+
+my @modelnames=&laps_tools::get_nl_value("nest7grid.parms","fdda_model_source",$dataroot);
+my $modelname = @modelnames[1];   
+print "modelnames (from fdda_model_source): @modelnames\n";
+print "modelname (from first element of modelnames array): $modelname\n";
+
+# Obtain window parameters
+@windowres=&laps_tools::get_fcst_img_res($dataroot);
+$window=@windowres[0];
+$resolution=@windowres[1];              
+
+my $followup_verif = "@prefix@/etc/www/followup_verif.sh $domain ensemble $dataroot $window $resolution @prefix@";
+
+my $w3recent;
+
+my @cycle_time=&laps_tools::get_nl_value("nest7grid.parms","model_cycle_time",$dataroot);
+my $cycle_time = $cycle_time[0]; # seconds
+
+my @model_fcst_intvl=&laps_tools::get_nl_value("nest7grid.parms","model_fcst_intvl",$dataroot);
+my $model_fcst_intvl = $model_fcst_intvl[0]; # seconds
+
+my @model_fcst_len=&laps_tools::get_nl_value("nest7grid.parms","model_fcst_len",$dataroot);
+my $model_fcst_len = $model_fcst_len[0]; # minutes
+
+my @laps_cycle_time=&laps_tools::get_nl_value("nest7grid.parms","laps_cycle_time",$dataroot);
+my $laps_cycle_time = $laps_cycle_time[0]; # seconds
+
+my $verif_intvl = $model_fcst_intvl;
+if($laps_cycle_time > $verif_intvl) {$verif_intvl = $laps_cycle_time;}
+
+my $cycle_freq; # Cycle frequency in hours
+my $timeout;    # Seconds to wait before giving up after starting
+if(defined $opt_c){
+    $cycle_freq = $opt_c;              
+    $timeout = $opt_c*3600;            
+}else{
+    $cycle_freq = $cycle_time / 3600.; 
+    $timeout = $cycle_time;            
+}
+
+my ($output_inc); # Forecast output interval (hours)
+if(defined $opt_f){
+    $output_inc = $opt_f;                     
+}else{
+    $output_inc = $verif_intvl / 3600.;  
+}
+
+my $fcst_len; # Forecast length (hours)
+if(defined $opt_l){
+    $fcst_len = $opt_l; 
+}else{
+    $fcst_len = $model_fcst_len / 60.; 
+}
+
+my $init_base_hr = 0;        # Earliest cycle each day in GMT hour
+
+my $fsf_subdir = "lapsprd/fsf/$opt_m-$opt_a";
+my $fua_subdir = "lapsprd/fua/$opt_m-$opt_a";
+
+my $sleep_time_fsf = 15; # Number of seconds to wait for fsf file to fill up       
+my $sleep_time     = 60; # Number of seconds to sleep between attempts to process
+
+# END OF USER DEFINED PARAMS
+
+# Set up cycle to process based on system time and delay (UTC)
+
+print "setup time parameters\n";
+#beka my $systime_now = time-3600;
+my $systime_now = time;
+if (defined $opt_y) {
+    $systime_now = $systime_now - ($opt_y * 3600);
+}
+my $cyc_freq_sec = $cycle_freq * 3600;
+my $init_base_sec = $init_base_hr * 3600;
+my $remainder = ($systime_now - $init_base_sec) % $cyc_freq_sec;
+my $cycle_sec = $systime_now - $remainder;
+
+# Convert the cycle time in seconds to normal parameters
+
+my @monthtxt = qw(JAN FEB MAR APR MAY JUN JUL AUG SEP OCT NOV DEC);
+my ($cycsec,$cycmin,$cychour,$cycmday,$cycmon,$cycyear,$cycwday,$cycyday,
+    $cycisdt) = gmtime($cycle_sec);
+
+print "convert time parameters\n";
+my $cycyear4 = $cycyear + 1900;
+$cycyear = $cycyear - 100;
+$cycyear = "0".$cycyear while(length($cycyear)< 2);
+#print "Cycle year: $systime_now $opt_y $cycyear\n";
+$cycyday++;
+$cycyday = "0".$cycyday while(length($cycyday)<3);
+$cychour = "0".$cychour while(length($cychour)<2);
+$cycmin = "0".$cycmin while(length($cycmin)<2);
+my $cycmontxt = $monthtxt[$cycmon];
+$cycmon++;
+$cycmon="0".$cycmon while (length($cycmon)<2);
+$cycmday = "0".$cycmday while(length($cycmday)<2);
+my $www_time = $cycmday."-".$cycmontxt."-".$cycyear4." ".$cychour.$cycmin;
+my $cycle = $cycyear.$cycyday.$cychour."00";
+
+print "Cycle to get: $cycle\n";
+
+# Create the list of file times we need to get
+
+my $num_files = int(($fcst_len/$output_inc) + 0.5)+1;
+print "output_inc: $output_inc\n";
+print "fcst_len: $fcst_len\n";
+print "num_files: $num_files\n";
+
+my $fcsttime = 0;
+my ($fcsthr,$fcstmn);
+my @times;
+while ($fcsttime <= $fcst_len) {
+  $fcsthr=int($fcsttime);
+  $fcstmn=($fcsttime-$fcsthr) * 60;
+  $fcsthr = "0".$fcsthr while (length($fcsthr)<2);
+  $fcstmn = "0".$fcstmn while (length($fcstmn)<2);
+  push @times, $cycle.$fcsthr.$fcstmn;
+  $fcsttime = $fcsttime + $output_inc;
+}
+
+print "times: @times\n";
+
+my @times_new;
+my @fsffiles_new;
+# Time to start the loop to get all of the files
+my $time_start = time;
+my $elapsed = 0;
+my $times_rem = $num_files;
+my $time_now;
+my $arrpos;
+my ($remfile, $result);
+my $www_flag = 0;
+my $t; 
+
+my $modelrun;
+my $hhmm_modelrun;
+my $var;
+my $nimages;
+
+my $precip_var = "R03";
+
+my @vars = qw(REF SWI S8A RTO);
+push @vars, $precip_var;
+
+foreach $var (@vars) { 
+
+  my $fcstprd;                   
+  my $analprd;                   
+  my $command;            
+
+  my $imageoutdir;                                                    
+  my $imageoutfile_montage;
+
+  my $geom;
+ 
+  if($var eq "REF" || $var eq "LMR"){
+    $fcstprd = "Radar_Comp";
+    $analprd = "crf";
+    $imageoutdir = "$dataroot/lapsprd/verif/$var/plot/";          
+  }elsif($var eq "LLR"){
+    $fcstprd = "Radar_Sfc";
+    $analprd = "ptt";
+    $imageoutdir = "$dataroot/lapsprd/verif/$var/plot/";          
+  }elsif($var eq "SWI"){
+    $fcstprd = "Solar";
+    $analprd = "sol";
+    $imageoutdir = "$dataroot/lapsprd/verif/$var/pt/";          
+  }elsif($var eq "RTO"){
+    $fcstprd = "Precip";
+    $analprd = "sto";
+    $imageoutdir = "$dataroot/lapsprd/verif/$var/pt/";          
+  }elsif($var eq "$precip_var"){
+    $fcstprd = "Precip_Inc";
+    $analprd = "ptt";
+    $imageoutdir = "$dataroot/lapsprd/verif/$var/pt/";          
+  }else{
+    $fcstprd = "11u";
+    $analprd = "s8a";
+    $imageoutdir = "$dataroot/lapsprd/verif/$var/pt/";          
+  }
+
+  $geom="210x140!";
+
+  print "\n";
+  print "var:     $var\n";
+  print "fcstprd: $fcstprd\n";
+
+  $arrpos = 0;
+  @times_new = @times; 
+  print "updated times: @times\n";
+
+  my @analimagelist;
+  my @montageimagelist;
+
+  my $itime = -1;
+  my $a13time;
+
+  my $fullanal_image;                                           
+
+  foreach $a13time (@times) {
+#   print "fcstprd 2: $fcstprd\n";
+    $modelrun = substr($a13time,0,9);
+    $hhmm_modelrun = substr($a13time,5,4);
+
+    my @fcstimagelist;
+    $itime++;
+    if ($itime <= $opt_t){
+      my $valid_sec = $cycle_sec + $verif_intvl*$itime;
+      my $valid_a9time=&laps_tools::i4time_to_a9time($valid_sec+315619200);
+
+      my $analimagedir = "/w3/lapb/domains/$domain/anal2d/archive/$analprd/";
+      $fullanal_image = $analimagedir.$valid_a9time.".gif";
+
+#     Make black images (850/885 fcst/anal pixel sizes gives ratio of 96.05%)
+      my $black_image = $imageoutdir."black.gif";
+      $command = "convert $fullanal_image -resize 96.05% -fill black -draw 'color 0,0 reset' $black_image";
+      print "setting up command: $command\n";
+      $result=system("$command");
+
+      my $blackanal_image = $imageoutdir."blackanal.gif";
+      $command = "convert $fullanal_image               -fill black -draw 'color 0,0 reset' $blackanal_image";
+      print "setting up command: $command\n";
+      $result=system("$command");
+
+      if (! -e $fullanal_image) {
+        print "WARNING: $fullanal_image analysis image is not present - using blackanal_image $blackanal_image\n";
+        $fullanal_image = $blackanal_image;
+        push @analimagelist, $blackanal_image;                            
+      }else{
+        push @analimagelist, $fullanal_image;                              
+      }
+
+      $t=gmtime(); 
+      print "\nReady to process $a13time @modelnames... \n" ;
+
+      my $fcstimage;                             
+      $fcstimage = substr($a13time,9,4);
+
+      my $imiss=0;
+
+#     print "fcstprd 3: $fcstprd\n";
+
+#     Make list of all forecast model images for this time
+      foreach $modelname (@modelnames){
+
+#       print "fcstprd 4: $fcstprd\n";
+
+        if($fcstprd eq ""){
+          print "ERROR: fcstprd is blank\n";
+          exit;
+
+        }elsif($modelname ne "lga"){   
+        
+          my $fcstimagedir = "/w3/lapb/domains/$domain/fcst2d/$modelname/archive/$modelrun/$fcstprd";
+
+          if (! -d $fcstimagedir) {
+            print "WARNING: $fcstimagedir not present\n";
+            push @fcstimagelist, $black_image;                            
+            $imiss++;
+#           print "fcstprd 4a: $fcstprd\n";
+
+          }else{
+
+            $fcstimage = substr($a13time,9,4);
+            my $fullfcst_image = $fcstimagedir."/".$fcstimage.".gif";
+            print "\na13time/fcstimage/fullfcst_image $a13time $fcstimage $fullfcst_image... \n" ;
+
+#           print "fcstprd 4b: $fcstprd\n";
+
+#           system ("ls -l $fullfcst_image");
+            if (! -e $fullfcst_image) {
+              print "WARNING: $fullfcst_image is not present\n";
+              push @fcstimagelist, $black_image;                            
+              $imiss++;
+    
+            }else{
+              my $fcstsize = -s $fullfcst_image;
+
+#             print "fcstprd 4b1: $fcstprd\n";
+
+#             if($fcstprd eq "Solar" && $modelname =~ "hrrr" && $itime == 0){
+#             if($fcstprd eq "Solar" && $itime == 0){
+#               print "NOTE: zero hour solar forecast assumed to be absent for the HRRR\n";
+#               print "fcstprd 4b2: $fcstprd\n";
+#               push @fcstimagelist, $black_image;                            
+#               $imiss++;
+              if($fcstsize > 0){
+                push @fcstimagelist, $fullfcst_image;                            
+              }else{
+                print "WARNING: $fullfcst_image has zero size\n";
+                push @fcstimagelist, $black_image;                            
+                $imiss++;
+              } # filesize > 0
+
+            } # file exists
+
+#           print "fcstprd 4c: $fcstprd\n";
+
+          } # directory exists
+
+        } # valid fcstprd and modelname
+
+#       print "fcstprd 5: $fcstprd\n";
+
+      } # modelname
+
+#     Create montage of analysis and forecast images for this time, resizing the analysis image to match
+      $nimages = @fcstimagelist + 1;
+
+      my $ncols;
+      if($nimages == 2 || $nimages == 4){
+          $ncols = 2;
+      }else{     
+          $ncols = 3;
+      }
+
+      my $nrows = 1;
+      my $x = "x";
+      $nrows = int(($nimages-1) / $ncols) + 1;
+      $imageoutfile_montage = $imageoutdir.$fcstimage.".gif";
+
+      if($nimages > 0){
+          print "\nMontage the analysis and forecast images for this time...\n" ;
+#         $command = "rm -f $imageoutfile_montage; convert -resize 121.3% @fcstimagelist $imageoutfile_montage; montage $fullanal_image $imageoutfile_montage -mode Concatenate -tile $ncols$x$nrows $imageoutfile_montage";
+          $command = "rm -f $imageoutfile_montage; convert -resize 96.05% $fullanal_image $imageoutfile_montage; montage $imageoutfile_montage @fcstimagelist  -mode Concatenate -tile $ncols$x$nrows $imageoutfile_montage";
+          print "setting up command: $command\n";
+          $result=system("$command");
+
+          system("ls -l $imageoutfile_montage");
+
+          push @montageimagelist, $imageoutfile_montage;                    
+      }else{
+          print "\nNo images available at this time step for montage...\n" ;
+      }
+
+      print "done.\n";
+      splice @times_new, $arrpos, 1;
+
+    }else{
+      print "Not being processed for itime: $itime\n";
+      $arrpos++;
+
+    }
+  } # a13time
+
+# Add the last montage a second time
+  $nimages = @montageimagelist;
+
+  if($nimages == 0){
+      print "\nWARNING: No montages available for animation...\n" ;
+      exit;
+  }
+
+  push @montageimagelist, $imageoutfile_montage;                    
+    
+  print "\nProcessing $var images...  \n" ;
+
+  my ($imageoutfile_anal, $imageoutfile_fcst);
+
+# Add the last analysis a second time
+  push @analimagelist, $fullanal_image;                              
+
+  print "\nAnalysis Image List...  \n" ;
+  print @analimagelist;
+  print "\n\n" ;
+
+  print "\nAnimate the Analyses...  \n" ;
+  $imageoutfile_anal = $imageoutdir."analanim.gif";
+  $command = "convert -delay 75 -loop 0 $analimagelist[0] @analimagelist $imageoutfile_anal";
+  print "setting up command: $command\n";
+  $result=system("$command");
+
+# print "\nForecast Image List...  \n" ;
+# print @fcstimagelist;
+# print "\n\n" ;
+
+# $imageoutfile_fcst = $imageoutdir."fcstanim.gif";
+# $command = "convert -delay 50 -loop 0 @fcstimagelist $imageoutfile_fcst";
+# print "setting up command: $command\n";
+# $result=system("$command");
+
+  print "\nAnimate the Montages...  \n" ;
+  $imageoutfile_montage = $imageoutdir."montageanim.gif";
+  $command = "convert -delay 75 -loop 0 $montageimagelist[0] @montageimagelist $imageoutfile_montage";
+  print "setting up command: $command\n";
+  $result=system("$command");
+
+  print "\nCopy the Animated Montage...  \n" ;
+  $command = "cp $imageoutfile_montage $imageoutdir"."montageanim_$modelrun.gif";                              
+  print "setting up command: $command\n";
+  $result=system("$command");
+
+  print "\nUpdate HHMM Montage Link...  \n" ;
+  my $hhmm_link = "$imageoutdir"."montageanim_$hhmm_modelrun.gif";
+  $command = "rm -f $hhmm_link; ln -s $imageoutdir"."montageanim_$modelrun.gif ".$hhmm_link;                              
+  print "setting up command: $command\n";
+  $result=system("$command");
+
+  print "\nUpdate HHMM Montage Thumb...  \n" ;
+  my $thumb = "$imageoutdir"."montageanim_$hhmm_modelrun\_thumb.gif";
+# $command = "convert -resize 90x60! $imageoutdir"."montageanim_$modelrun.gif $thumb";                              
+  if(-e "$imageoutdir"."montageanim_$modelrun.gif"){ # Use analysis image for thumb, except remove the thumb if the montage isn't available
+      $command = "convert -resize $geom $imageoutfile_anal $thumb";
+  }else{
+      $command = "rm -f $thumb";
+  }
+  print "setting up command: $command\n";
+  $result=system("$command");
+
+  print "\nSetup Java Looper Directory and files...  \n" ;
+  my $looper_outdir = $imageoutdir."/loop_".$hhmm_modelrun;
+  $command = "mkdir -p $looper_outdir";
+  print "setting up command: $command\n";
+  $result=system("$command");
+
+} # var
+
+@times = @times_new;
+$times_rem = @times;
+
+$t=gmtime(); 
+
+# system("touch $w3recent/../finish.txt");
+
+print "Completion of followup_verif...\n";
+exit;  

@@ -1,0 +1,207 @@
+#!@PERL@
+# @configure_input@
+
+# Looks in logdir (from command line) or $LAPS_DATA_ROOT/log.
+# The other command line argument is the hour of the LAPS run
+# if not current.  Both command line arguments are optional;
+# order doesn't matter.
+
+require '@prefix@/etc/wgi_utils.pm';
+
+$nargs = @ARGV;
+if ($nargs == 0) {}
+elsif ($nargs == 1) {
+ $arg = shift;
+ if ($arg =~ /^[0-9]*$/) {$hr=$arg;}
+ else {$logdir = $arg;}
+ }
+elsif ($nargs == 2) {
+ $arg1 = shift;
+ $arg2 = shift;
+ if ($arg1 =~ /^[0-9]*$/) {$hr=$arg1; $logdir=$arg2;}
+ else {$hr=$arg2; $logdir=$arg1;}
+ }
+ 
+$LAPS_DATA_ROOT = $ENV{LAPS_DATA_ROOT};
+
+if (defined $logdir) {if ($logdir eq $LAPS_DATA_ROOT) {$logdir=$logdir."/log";} }
+elsif (defined $LAPS_DATA_ROOT) {$logdir=$LAPS_DATA_ROOT."/log";}
+else {die "Can't find path to log data.\n";}
+
+if (defined $hr) {$hr="0".$hr if (length($hr)<2);}
+
+# Get the most recent log file.
+
+$logname = "cloud";
+$filename = &wgi_utils::get_log_filename($LAPS_DATA_ROOT,$logname,$hr);
+
+open(FILE,$filename) or die "Can't open $filename.";
+@lines = <FILE>;
+print "\nReading from log file $filename\n\n";
+
+# Determine analysis validtime.
+$searchstring = "systime =";
+foreach (@lines) {
+  if (/$searchstring(.*)/) {
+    ($validtime) = split(" ",$1); 
+    last; } 
+}
+print "ANALYSIS VALID TIME (yydddhhmm): $validtime UTC\n\n";
+
+# See if the analysis is done.
+#@greplines = grep /End of Cloud Analysis Package/, @lines;
+#$ngreplines = @greplines;
+#if ($ngreplines == 0) {print "Cloud analysis isn't finished.\n";}
+
+# Determine background model.
+# ---------------------------
+
+($modelid,$modeltype,$runtime,$fcsthr,$mdlyr,$mdldy)=&wgi_utils::which_bkgd(@lines);
+ 
+print "Using $fcsthr fcst from $modelid model started at $runtime UTC \n";
+print "$modeltype $modelid $mdlyr$mdldy$runtime$fcsthr \n";
+
+# Temp/hgt info
+# ---------------
+print "\nLAPS temperature/height fields:\n";
+$searchstring = " Reading 3D ";
+foreach (@lines) {if (/$searchstring(.*)/) {print "$1\n";}}
+
+# Satellite data
+print "\nSatellite (IR):\n";
+
+@greplines = grep /Returning S8A/, @lines;
+foreach (@greplines) {
+  ($junk,@rest) = split;
+  print "    Using @rest ";
+  print "\n";
+}
+@greplines = grep /Mosaicing S8A/, @lines;
+foreach (@greplines) {
+  print "    $_";
+}
+@greplines = grep /No S8A/, @lines;
+print "   $greplines[0]";
+@greplines = grep /insufficient/, @lines;
+print "$greplines[0]";
+@greplines = grep /required/, @lines;
+print "$greplines[0]";
+print "\n";
+
+print "Satellite (Visible Albedo):\n";
+@greplines = grep /Returning ALB/, @lines;
+foreach (@greplines) {
+  ($junk,@rest) = split;
+  print "    Using @rest ";
+  print "\n";
+}
+@greplines = grep /Mosaicing ALB/, @lines;
+foreach (@greplines) {
+  print "    $_";
+}
+@greplines = grep /No VIS/, @lines;
+print " $greplines[0]";
+@greplines = grep /Visible albedo data used/, @lines;
+print "  $greplines[0]";
+@greplines = grep /l_use_vis set to not use vis data/, @lines;
+print " $greplines[0]";
+print "\n";
+
+print "Satellite (3.9 micron - used for nighttime stratus):\n";
+@greplines = grep /Returning S3A/, @lines;
+foreach (@greplines) {
+  ($junk,@rest) = split;
+  print "    Using @rest ";
+  print "\n";
+}
+@greplines = grep /No S3A/, @lines;
+print "   $greplines[0]";
+print "\n";
+
+print "Satellite (CO2-Slicing Cloud-tops):\n";
+@greplines = grep /Number of valid CO2-Slicing soundings/, @lines;
+print "  $greplines[0]";
+@greplines = grep /CO2-Slicing data potentially used/, @lines;
+print "   $greplines[0]";
+print "\n";
+
+# Radar data
+print "Radar:\n";
+
+@greplines = grep /n_radars/, @lines;
+print "   $greplines[0]";
+
+@greplines = grep /Read radar/, @lines;
+#print "$greplines[0]\n";
+foreach (@greplines) {
+  ($junk1,$junk2,@rest) = split;
+  print "    @rest ";
+  print "\n";
+}
+
+@greplines = grep /coverage/, @lines;
+print "   $greplines[0]";
+print "\n";
+
+@greplines = grep /First guess radar/, @lines;
+print "   $greplines[0]";
+print "\n";
+
+# Surface metars (sfc.pl has a nicer way of printing these out)
+print "METARS:\n    ";
+@greplines = grep /   METAR  /, @lines;
+$iprint=0;
+foreach (@greplines) {
+  ($name,@junk) = split;
+  if(@junk > 3){
+      print "$name "; 
+      $iprint=$iprint+1;
+      if ($iprint > 17) {print "\n    "; $iprint=0;} 
+  }
+}
+print "\n";
+print "\n";
+
+# Surface synop (sfc.pl has a nicer way of printing these out)
+print "SYNOP:\n";
+@greplines = grep /   SYNOP  /, @lines;
+foreach (@greplines) {
+  ($name,@junk) = split;
+  if(@junk > 3){print "$name ";}
+}
+print "\n";
+print "\n";
+
+# Pirep data
+print "Pilot reports:\n";
+$searchstring = "num pireps/num good pireps/cloud layers =";
+foreach (@lines) {
+  if (/$searchstring(.*)/) {
+   ($dummy,$npireps,$ngood,$nlayers) = split /\s+/, $1;
+   print "  $npireps pireps\n";
+   print "  $ngood good reports\n";
+   print "  $nlayers layers\n";
+  }
+}
+
+print "\n";
+print "Solar Radiation Verification:\n";
+
+@greplines = grep /sv/, @lines;
+print "@greplines\n";
+
+@greplines = grep /Solar Radiation \(QCed\)/, @lines;
+print "@greplines\n";
+
+@greplines = grep /Residuals vs cloud fraction/, @lines;
+print "@greplines\n";
+
+@greplines = grep /means/, @lines;
+print "@greplines\n";
+
+@greplines = grep /sensitivity/, @lines;
+print "@greplines\n";
+
+@greplines = grep /gnuplot/, @lines;
+print "$greplines[0]\n";
+

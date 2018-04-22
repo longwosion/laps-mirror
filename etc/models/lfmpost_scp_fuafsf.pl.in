@@ -1,0 +1,543 @@
+#!@PERL@ 
+use strict;
+use Getopt::Std;
+use Time::Local;
+
+# Ensure the ncgen program is in environment path
+$ENV{PATH}="/opt/netcdf-pgi/bin:$ENV{PATH}";
+
+# Setup command line options:
+#    -l lapsprd (needs remote machine name and directory, except no machine name for "-c exchange or bbcp" options)
+#    -L flag meaning -l represents the LAPS_DATA_ROOT path to the output directory (minus the nest)
+#    -m model type [optional if -a will be set]
+#    -a model configuration (e.g. schultz) [optional if -m has been set]
+#    -r model root                                       
+#    -D root directory specified by -r is actually the LAPS_DATA_ROOT on the source machine, dummy argument is needed
+#    -d init date (yyyymmddhh, default = current hour) [Mandatory if -D is set]
+#    -g model grid to process (default = 1, negative value does all grids)
+#    -f number of forecasts including initial time (default = 12)
+#    -i forecast increment (minutes, default = 60)
+#    -s start forecast time (hours, default = 0)
+#    -p model prefix (default = model dependent)
+#    -w maximum wait time (seconds, default = 0);
+#    -M path to Mass Store if desired
+#    -S skip remote copy (just do Mass Store if that is chosen)
+#    -x <blank> if present an awips bigfile will be created
+#    -e avoid exiting if a particular file is missing (position as last argument or supply dummy value)
+#    -c remote copy method (rsync, scp, exchange, bbcp), default is rsync [optional]
+#    -R copy surface fsf or upper air fua only (specify "fua", "fsf", or "both") [optional]
+
+use vars qw($opt_a $opt_l $opt_L $opt_m $opt_r $opt_d $opt_g $opt_f $opt_i $opt_p $opt_s $opt_w $opt_M $opt_S $opt_x $opt_e $opt_c $opt_R $opt_D);
+#getopt('l:Lm:a:r:d:g:f:i:s:p:w:M:Sxec:RD');
+getopt('lmardgfispwMSxecRD');
+
+# Obtain perl module from LAPSINSTALLROOT
+require "@prefix@/etc/laps_tools.pm";
+require "@prefix@/etc/oputil.pm";
+
+if(! defined $opt_R){ # check surface only flag
+    print "opt_R is not defined\n";
+}else{
+    if($opt_R eq "dummy"){
+        $opt_R = "fsf";
+    }
+    print "opt_R is defined as $opt_R\n";
+}
+
+my $now = `date -u`;
+$now = substr($now,0,length($now)-1);
+print "*** lfmpost_scp_fuafsf.pl script started:  $now ***\n\n";
+
+# Define model type (default = mm5).
+
+#my $model = "mm5";
+#$model = $opt_m if defined($opt_m);
+
+# Define model grids (default = 1).
+
+my $ngrid = 1;
+my (@grid,$n);
+$grid[1] = 1;
+$grid[1] = $opt_g if defined ($opt_g);
+if ($grid[1] < 0) {
+   $ngrid = abs($grid[1]);
+   for ($n=1; $n<=$ngrid; $n++) {
+      $grid[$n] = $n;
+   }
+}
+print "Number of nests = $ngrid\n";
+
+# Define model data directories.
+
+my $lapsprd;
+$lapsprd = "$opt_l" if defined($opt_l);
+
+my $modelroot;
+#my $name = uc($model)."_ROOT";
+#$modelroot = $ENV{"$name"} if defined($ENV{"$name"});
+$modelroot = "$opt_r" if defined($opt_r);
+
+if (! defined($lapsprd)) {
+  print "LAPSPRD is not defined.\n";
+  exit;
+}
+if (! defined($modelroot)) {
+  print "$modelroot is not defined.\n";
+  exit;
+}
+
+my $name;
+$name = "$opt_m" if defined($opt_m);
+$name = "$opt_a" if defined($opt_a);
+$name = "$opt_m-$opt_a" if (defined($opt_m) && defined($opt_a));
+
+# Determine default init time based on current time.
+
+my $time = time;
+my ($yyyy, $mm, $dd, $hh) = &time::unix_to_time($time);
+my $mn = "00";
+
+# Override default time based on command line options, if present.
+
+my(@filelist,@filelist_sorted,$nfiles,$date,$date_a9);
+
+if ($opt_d) {
+   $_ = $opt_d;
+   if (/\d\d\d\d\d\d\d\d\d\d/) {
+      $yyyy = substr($opt_d,0,4); 
+      $mm = substr($opt_d,4,2); 
+      $dd = substr($opt_d,6,2);
+      $hh = substr($opt_d,8,2);
+#     $mn = 0;
+
+#     $mm = "0".$mm while(length($mm)<2);
+#     $dd = "0".$dd while(length($dd)<2);
+#     $hh = "0".$hh while (length($hh)<2);
+
+      print "opt_d = $opt_d\n";
+      print "yyyy = $yyyy\n";
+      $date = "$yyyy$mm$dd$hh";
+      print "Date from user input is $date\n";
+
+   } else {
+      print "   Invalid date: $opt_d\n";
+      print "   Date format is yyyymmddhh\n";
+      print "   Quit...\n";
+      exit;
+
+   }
+
+}else{ # find latest directory available
+    if (defined ($opt_D)){
+        print "   exiting: -d is needed since -D is set\n";
+        exit;
+    }
+    opendir(DIR,$modelroot);
+    @filelist = grep(/\d\d\d\d\d\d\d\d/, readdir(DIR));
+    @filelist_sorted = (sort @filelist);
+    $nfiles = @filelist_sorted;
+    print "@filelist_sorted\n";
+    $date = @filelist_sorted[$nfiles-1];
+    $yyyy = substr($date,0,4); 
+    $mm = substr($date,4,2); 
+    $dd = substr($date,6,2);
+    $hh = substr($date,8,2);
+
+    print "Date from model directory is $date - nfiles is $nfiles\n";
+}
+
+my $yy = substr($yyyy,2,2); 
+
+my $jy = &laps_tools::get_julian_day($dd,$mm,$yyyy);
+$jy = "0$jy" while(length($jy) < 3);
+
+$date_a9="$yy$jy$hh$mn"; 
+
+# Define forecast parameters.
+
+my $nfcst = 12;
+$nfcst = $opt_f if defined ($opt_f);
+my $n;
+
+my $finc = 3;
+$finc = $opt_i/60 if defined ($opt_i);
+my $finc_mn = $opt_i if defined ($opt_i);
+
+my $sfcst = 0;
+$sfcst = $opt_s if defined ($opt_s);
+
+# LAPS i4time uses a base year of 1960 while unix time uses a base year of
+#  1970.  Account for this using the following parameter which is the number 
+#  of seconds between 1960 and 1970.
+
+my $decade = 315619200;
+
+# Define wait parameters.
+
+my $elapsed = 0;
+my $waitinc = 10;
+my $maxwait = 0;
+$maxwait = $opt_w if defined ($opt_w);
+
+# Echo input arguments
+
+print "lapsprd: $lapsprd\n";
+print "modelroot: $modelroot\n";
+print "date: $date\n";
+print "date_a9: $date_a9\n";
+print "nfcst: $nfcst\n";
+print "finc (minutes): $finc_mn\n";
+print "maxwait: $maxwait\n";
+
+
+print "name: $name\n";
+
+my $inittime = &time::time_to_unix($mm,$dd,$yyyy,$hh,$mn,0) + $decade;
+my $current_sec = timegm(gmtime);
+
+my $endsec;
+if ($nfiles > 0) {
+    $endsec = &time::time_to_unix($mm,$dd,$yyyy,$hh,$mn,0) + 40000;
+}else{
+    $endsec = $current_sec + 40000;
+}
+
+my $new_cycle_min;
+my $g,@grid;
+my $grid;
+my @times;
+
+my ($fua_dir,$fsf_dir);
+
+# Loop through each forecast time for remote copy
+if (! $opt_S){ # test for skipping remote copy
+ for ($n=0; $n<$nfcst; $n++) {
+  print "loop increment is $n\n";
+  $current_sec = timegm(gmtime);
+  if ( $current_sec > $endsec && (! defined($opt_d)) )
+  {
+   $new_cycle_min = int(($current_sec - $endsec)/60.);
+   print "Past expected end time of run by $new_cycle_min minutes...\n";
+   print "New cycle will start in a few minutes.  So quit post processing\n";
+   die;
+  }
+
+# Wait for fsf and fua file and make sure file size is greater than zero.
+  my $fcst_mn = $n * $finc_mn;
+  my $fcst_hr = int($fcst_mn/60);
+  $fcst_mn = $fcst_mn - ($fcst_hr*60);
+  $fcst_hr = "0".$fcst_hr while (length($fcst_hr)<2);
+  $fcst_mn = "0".$fcst_mn while (length($fcst_mn)<2);
+
+  my $fcst_time = $fcst_hr.$fcst_mn;
+
+  my $fua_file = "$date_a9$fcst_time".".fua";
+  my $fsf_file = "$date_a9$fcst_time".".fsf";
+
+  print "fua_file = $fua_file\n";
+
+  push @times, $fcst_time;
+  print "times: @times\n";
+
+# Add counting for multiple domains
+
+  my $skip;
+
+  print "ngrid = $ngrid\n";
+  for ($g=1; $g<=$ngrid; $g++) {
+    $grid = $grid[$g];
+
+    if (defined ($opt_D)){
+        print "opt_D is set, modelroot represents LAPS_DATA_ROOT\n";
+        $fua_dir = "$modelroot/lapsprd/fua/$name";
+        $fsf_dir = "$modelroot/lapsprd/fsf/$name";
+    }else{
+        print "opt_D is not set, modelroot is a true modelroot directory\n";
+        $fua_dir = "$modelroot/$date/wrfprd/d0$grid/fua";
+        $fsf_dir = "$modelroot/$date/wrfprd/d0$grid/fsf";
+    }
+
+    if($opt_R ne "fsf"){ # check surface only flag
+        $skip = 0;
+    }else{
+        $skip = 1; # Skip fua checking when surface only flag is set
+    }
+    while ( !(-e "$fua_dir/$fua_file") && $skip==0) {
+         print "file does not exist $fua_dir/$fua_file\n";
+         system ("date");
+         if ($elapsed >= $maxwait) {
+            print "    LFM post process wait for FUA timed out after $elapsed seconds: maxwait = $maxwait\n\n";
+            print "    fua_file = $fua_dir/$fua_file\n";
+            if (! defined ($opt_e)){
+                goto MSS;
+            }
+            print " Skip exit, look for next file...\n";
+            $skip=1;
+         }else{
+            $elapsed += $waitinc;
+            sleep $waitinc;
+         }
+    }
+
+    print "fsf_file = $fsf_file\n";
+
+    if($opt_R ne "fua"){ # check upper air only flag
+        $skip = 0;
+    }else{
+        $skip = 1; # Skip fsf checking when upper air only flag is set
+    }
+    while ( !(-e "$fsf_dir/$fsf_file") && $skip==0) {
+         print "file does not exist $fsf_dir/$fsf_file\n";
+         system ("date");
+         if ($elapsed >= $maxwait) {
+            print "    LFM post process wait for FSF timed out after $elapsed seconds: maxwait = $maxwait\n\n";
+            print "    fsf_file = $fsf_dir/$fsf_file\n";
+            if (! $opt_e){
+                goto MSS;
+            }
+            print " Skip exit, look for next file...\n";
+            $skip=1;
+         }else{
+            $elapsed += $waitinc;
+            sleep $waitinc;
+         }
+    }
+
+    print "found it, inittime: $inittime\n";
+    print "elapsed time is $elapsed\n";
+    system ("ls -l $fua_dir/$fua_file");
+    system ("ls -l $fsf_dir/$fsf_file");
+    sleep 10;
+    $elapsed = 0;
+
+#   Determine size of fua/fsf files
+    my $waitsize = 1;
+
+    my $fuasize;
+    $fuasize = -s "$fua_dir/$fua_file";
+    $waitsize = 1;
+    while ($fuasize == 0 && $waitsize <= 5) {
+        print "fua size = $fuasize, wait count = $waitsize\n";
+        sleep 10;
+        $waitsize++;
+        $fuasize = -s "$fua_dir/$fua_file";
+    }
+    print "fua size = $fuasize\n";
+
+    my $fsfsize;
+    $fsfsize = -s "$fsf_dir/$fsf_file";
+    $waitsize = 1;
+    while ($fsfsize == 0 && $waitsize <= 5) {
+        print "fsf size = $fsfsize, wait count = $waitsize\n";
+        sleep 10;
+        $waitsize++;
+        $fsfsize = -s "$fsf_dir/$fsf_file";
+    }
+    print "fsf size = $fsfsize\n";
+
+#   Send to remote directory
+    system ("date");
+    my $scp_cmd;
+
+    my $remote_copy;
+    my $method = "";
+
+    if($opt_c eq "scp"){
+      $remote_copy = "scp -o ConnectTimeout=200";    # slower though maybe more reliable
+      print "opt_c / remote_copy are $opt_c $remote_copy\n";
+    }elsif($opt_c eq "exchange"){
+      $remote_copy = "@prefix@/etc/copyremote.sh";                                          
+      print "opt_c / remote_copy are $opt_c $remote_copy\n";
+      $method = "exchange";
+    }elsif($opt_c eq "bbcp"){
+      $remote_copy = "@prefix@/etc/copyremote.sh";                                          
+      print "opt_c / remote_copy are $opt_c $remote_copy\n";
+      $method = "bbcp";
+    }else{
+      $remote_copy = "rsync -lptgvvz --timeout=800"; # faster for larger files
+      print "opt_c / remote_copy are $opt_c $remote_copy\n";
+    }
+
+#   Force this to rsync for now
+#   $remote_copy = "rsync -lptgvvz --timeout=300";   # faster for larger files
+
+    if ($opt_a eq "noSubDir") {
+      $scp_cmd = "$remote_copy $fua_dir/$fua_file $lapsprd/d0$grid/fua $method";
+    }else {
+      if ($opt_L) {
+        if ($method eq "exchange" || $method eq "bbcp") {
+          $scp_cmd = "cd $fua_dir; $remote_copy $fua_file $lapsprd/lapsprd/fua/$name $method";
+        }else{
+          $scp_cmd = "$remote_copy $fua_dir/$fua_file $lapsprd/lapsprd/fua/$name $method";
+        }
+      }else{
+        $scp_cmd = "$remote_copy $fua_dir/$fua_file $lapsprd/d0$grid/fua/$name $method";
+      }
+    }
+
+    if($opt_R ne "fsf"){ # check surface only flag
+      print "Running command: $scp_cmd\n";
+      system ($scp_cmd);
+      if($remote_copy =~ "rsync"){
+        print "Running repeat command: $scp_cmd\n";
+        system ($scp_cmd);
+        #if($fcst_time eq "0000"){
+          print "Running repeat command: $scp_cmd\n";
+          system ($scp_cmd);
+          print "Running repeat command: $scp_cmd\n";
+          system ($scp_cmd);
+        #}
+      }
+      system ("date");
+    }
+
+    if ($opt_a eq "noSubDir") {
+      $scp_cmd = "$remote_copy $fsf_dir/$fsf_file $lapsprd/d0$grid/fsf $method";
+    }else {
+      if ($opt_L) {
+        if ($method eq "exchange" || $method eq "bbcp") {
+          $scp_cmd = "cd $fsf_dir; $remote_copy $fsf_file $lapsprd/lapsprd/fsf/$name $method";
+        }else{
+          $scp_cmd = "$remote_copy $fsf_dir/$fsf_file $lapsprd/lapsprd/fsf/$name $method";
+        }
+      }else {
+        $scp_cmd = "$remote_copy $fsf_dir/$fsf_file $lapsprd/d0$grid/fsf/$name $method";
+      }
+    }
+
+    if($opt_R ne "fua"){ # check upper air only flag
+      print "Running command: $scp_cmd\n";
+      system ($scp_cmd);
+      if($remote_copy =~ "rsync"){
+        print "Running repeat command: $scp_cmd\n";
+        system ($scp_cmd);
+      }
+      system ("date");
+    }
+
+  } # grid loop
+ } # forecast time loop
+
+}else{ # Skip remote copy
+ print "Skipping Remote Copy\n";
+
+} # test of $opt_S 
+
+MSS:
+
+if(! defined $opt_M){
+    print "no MSS copy is needed\n";
+    exit;
+}
+
+# Loop through each forecast time for MSS copy
+for ($n=0; $n<$nfcst; $n++) {
+  print "MSS loop increment is $n out of $nfcst-1\n";
+  $current_sec = timegm(gmtime);
+  if ( $current_sec > $endsec && (! defined($opt_d)) )
+  {
+   $new_cycle_min = int(($current_sec - $endsec)/60.);
+   print "Past expected end time of run by $new_cycle_min minutes...\n";
+   print "New cycle will start in a few minutes.  So quit post processing\n";
+   die;
+  }
+
+# Wait for fsf and fua file and make sure file size is greater than zero.
+  my $fcst_mn = $n * $finc_mn;
+  my $fcst_hr = int($fcst_mn/60);
+  $fcst_mn = $fcst_mn - ($fcst_hr*60);
+  $fcst_hr = "0".$fcst_hr while (length($fcst_hr)<2);
+  $fcst_mn = "0".$fcst_mn while (length($fcst_mn)<2);
+
+  my $fcst_time = $fcst_hr.$fcst_mn;
+
+
+  my $fua_file = "$date_a9$fcst_time".".fua";
+  my $fsf_file = "$date_a9$fcst_time".".fsf";
+
+  print "date_a9 = $date_a9\n";
+  print "fcst_time = $fcst_time\n";
+  print "fua_file = $fua_file\n";
+
+  while ( !(-e "$fua_dir/$fua_file")) {
+         print "file does not exist\n";
+         if ($elapsed >= $maxwait) {
+            print "    LFM post process wait for FUA timed out after $elapsed seconds: maxwait = $maxwait\n\n";
+            print "    fua_file = $fua_dir/$fua_file\n";
+            if (! defined ($opt_e)){
+                exit;
+            }
+            print " Skip exit, look for next file...\n";
+         }
+         $elapsed += $waitinc;
+         sleep $waitinc;
+  }
+
+  print "fsf_file = $fsf_file\n";
+
+  while ( !(-e "$fsf_dir/$fsf_file")) {
+         print "file does not exist\n";
+         if ($elapsed >= $maxwait) {
+            print "    LFM post process wait for FSF timed out after $elapsed seconds: maxwait = $maxwait\n\n";
+            print "    fsf_file = $fsf_dir/$fsf_file\n";
+            if (! $opt_e){
+                exit;
+            }
+            print " Skip exit, look for next file...\n";
+         }
+         $elapsed += $waitinc;
+         sleep $waitinc;
+  }
+
+  print "found it, inittime: $inittime\n";
+  print "elapsed time is $elapsed\n";
+  system ("ls -l $fua_dir/$fua_file");
+  system ("ls -l $fsf_dir/$fsf_file");
+  sleep 10;
+  $elapsed = 0;
+
+# Send to remote directory on MSS
+  system ("date");
+
+  my $msspath;
+  my $mssfullpath;
+
+# $msspath = "/mss/fsl/frd/lapb/hmt_2008";
+  $msspath = $opt_M;
+  $mssfullpath = "$msspath/$yyyy/$mm/$dd/$date_a9";
+
+  my ($hsi_cmd,$mss_cmd);
+
+# Add counting for multiple domains
+
+  print "ngrid = $ngrid\n";
+  for ($g=1; $g<=$ngrid; $g++) {
+    $grid = $grid[$g];
+
+    $mss_cmd = "hsi mkdir -p $mssfullpath/fua/$name";
+    print "Running command: $mss_cmd\n";
+    system ($mss_cmd);
+
+    chdir($fua_dir);
+    $hsi_cmd = "cd $mssfullpath/fua/$name; cput $fua_file";
+    $mss_cmd = "hsi \"$hsi_cmd\"";
+    print "Running command: $mss_cmd\n";
+    system ($mss_cmd);
+    system ("date");
+
+    $mss_cmd = "hsi mkdir -p $mssfullpath/fsf/$name";
+    print "Running command: $mss_cmd\n";
+    system ($mss_cmd);
+
+    chdir($fsf_dir);
+    $hsi_cmd = "cd $mssfullpath/fsf/$name; cput $fsf_file";
+    $mss_cmd = "hsi \"$hsi_cmd\"";
+    print "Running command: $mss_cmd\n";
+    system ($mss_cmd);
+    system ("date");
+
+  } # grid loop
+
+} # forecast time loop
+
+exit;

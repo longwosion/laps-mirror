@@ -1,0 +1,53 @@
+
+  Tree diagram outlining the source code for 'obs_driver.x'
+
+  Subroutine Name                         File Name:             Type/Format:
+  ---------------                         ----------             ------------
+ 
+main                                      obs_driver.f
+    get_obs_driver_parms                       "
+    obs_driver_sub                             "
+        get_metar_obs                     get_metar_obs.f        metar/synop 
+            read_metar                    read_metar.f           NIMBUS/WFO
+            read_metar_cwb                read_metar_cwb.f       CWB/GTS
+            read_synop_cwb                read_synop_cwb.f          "
+                read_synop_cwb_sub             "                    "
+                read_meso_cwb                  "                 CWB (_h.pri)
+                    read_tmeso_stntbl          "                    "
+  
+        get_sao_obs_af                    get_metar_obs_af.f     metar/synop
+            read_metar_af                 read_metar_af.f        AFWA
+
+        get_local_obs                     get_local_obs.f        mesonet (LDAD)
+            read_ldad_madis_netcdf        read_ldad_madis_data.f NIMBUS/WFO/MADIS
+            madis_qc_r                    qc_madis.f        
+            madis_qc_b                         "
+
+        get_hydro_obs                     get_hydro_obs.f        MADIS / HYDRO
+            read_madis_hydro_netcdf       read_madis_hydro_data.f 
+
+        get_local_cwb                     get_local_cwb.f        CWB mesonets
+            read_local_cwb                read_local_cwb.f       CWB mesonets
+                read_agr_cwb                   "                      "
+                read_cum_cwb                   "                      "
+                read_shp_cwb                   "                      "
+
+        get_maritime_obs                  get_maritime_obs.f     maritime obs
+            read_maritime                 read_maritime.f        NIMBUS/WFO
+            read_buoy_cwb                 read_buoy_cwb.f        CWB/GTS
+            read_ship_cwb                 read_ship_cwb.f        CWB/GTS
+
+        get_synop_obs                     get_synop_obs.f        synop obs
+            read_synop                    read_synop.f           NIMBUS
+
+        get_gps_obs                       get_gps_obs.f          gps obs
+            read_gps                      read_gps.f             NIMBUS
+
+        tower_sfc_driver                  tower_sfc_driver.f     RSA
+
+        apply_blacklist                   obs_driver.f
+
+        check_for_dupes                        "
+
+        write_surface_obs                 lib/sfc_routines.f
+

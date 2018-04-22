@@ -1,0 +1,69 @@
+
+  Tree diagram outlining the source code for 'STMAS3D.exe'
+
+  Subroutine Name                              File Name:
+  ---------------                              ----------
+ 
+program main                                   main.f90
+    BKGRNDOBS                                  input_bg_obs.f90
+        READNMLST
+        RDLAPSBKG                              read_backgrd.f90
+        RDBKGTEST                                    "
+        GETBKGRND_NEW
+        RDBUFROBS
+        RDLAPSRDR                              readobserves.f90
+        RDOBSTEST
+        ADDBKGRND
+        BKGTOFINE
+    MGANALYSSO                                 stmas_core_lgbfs.f90
+        PREPROCSS
+        RDINITBGD
+        PHYSCPSTN
+        GETCOEFFT
+        MINIMIZER_CG
+        COAS2FINE_XIE
+        FINE2COAS
+        PSTPROCSS
+        PREPROCSS
+        RDINITBGD
+        PHYSCPSTN
+        GETCOEFFT
+        MINIMIZER_CG
+        COAS2FINE_XIE
+        COAS2FINE_XIE
+        FINE2COAS
+        PSTPROCSS
+        INTERPLTN                             
+        SYSTEM_CLOCK                                     
+        cg_descent (X, NUMVARS, cg_value, cg_grad,                 &
+        SYSTEM_CLOCK                                         
+        TMPMEMALC
+        GRDMEMRLS
+        GRDMEMALC
+        TMPMEMRLS
+        TMPMEMALC
+        GRDMEMRLS
+        GRDMEMALC
+        TMPMEMRLS
+        TMPMEMALC
+        GRDMEMRLS
+        GRDMEMALC
+        TMPMEMRLS
+        WCOMPGERNL
+        COSTGRADT2
+        COSTFUNCT2
+        COSTFUNCT2
+        WCOMPGERNL      ! MODIFIED BY ZHONG
+    OUTPUTLAPS                                 output_anals.f90
+    OUTPUTANA                                        "
+        WIND_POST_PROCESS                      src/lib/wind/wind_post_process.f
+        WRITE_TEMP_ANAL                        src/lib/temp/puttmpanal.f
+
+
+  Tree diagram outlining the source code for 'STMAS3D_CG.exe'
+
+  Subroutine Name                              File Name:
+  ---------------                              ----------
+
+
+

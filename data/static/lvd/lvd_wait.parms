@@ -1,0 +1,3 @@
+10         !check interval, every 10 seconds
+60         !total wait time (seconds)                                                                 
+3700       !age threshold, 3700 seconds; don't wait if data is > 1 hr old

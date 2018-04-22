@@ -1,0 +1,604 @@
+#!@PERL@
+#J.Smart 12/03: Original multi-disk partition input data and multi-machine run
+#               environment.
+# "      11/04: Generalize for input data on one disk and running on one machine
+#               by adding command line args link_tmp_dirs and multi_machine.
+#
+use strict;
+use English;
+use Getopt::Long;
+my($INSTALL_ROOT,$DATA_ROOT,$beg_time,$end_time,$lapsdriver,$runsched,$driverargs,$wideband_2_netcdf);
+my($link_tmp_dirs,$multi_machine);
+
+my $result = GetOptions('install_root=s',  \$INSTALL_ROOT,
+                        'dataroot=s',      \$DATA_ROOT,
+                        'beg_time=s',      \$beg_time,
+                        'end_time=s',      \$end_time,
+                        'run_sched=s',     \$runsched,
+                        'laps_driver=s',   \$lapsdriver,
+                        'driver_args=s',   \$driverargs,
+                        'wideband_2_nc=s', \$wideband_2_netcdf,
+			'linktmpdirs',     \$link_tmp_dirs,
+			'multimachine',    \$multi_machine,
+                        'help',            \&help_sub,
+                        '<>',              \&help_sub);
+
+# Summary of command line arguments
+
+#beg_time:        beginning time of post analysis period.
+#
+#end_time:        ending time of post analysis period.
+#
+#install_root:    install root for laps binaries.
+#
+#data_root:       dataroot for post analysis runs output.
+#
+#
+#run_sched:       run LAPS sched.pl: Add in dbl quotes command line variables for sched.
+#                 If there are no variables to pass in for the 'sched' a blank "   " entry is still needed 
+#
+#laps_driver:     activate data ingest via laps_driver.pl routine (satellite, radar, remap)
+#                 run the laps_driver modules (arguments: lvd, vrc, lsr, remap, ln3, or all).
+#
+#driver_args:     Dbl quotes command line variables for laps_driver.
+#
+#wideband_2_nc:   activate radar netcdf format generator
+#                 the argument value is the root path of the Polar NetCDF radar files 
+#                 (e.g. $LAPS_DATA_ROOT/lapsprd/rdr/wideband)
+#
+#link_tmp_dirs:   call tmplink module to softlink appropriate raw data directories to
+#                 machine specific /tmp directory.  Specific to IHOP rerun strategy
+#
+#multi_machine:   indicates the need to generate "systime.dat" file in machine specific
+#                 /tmp directory and not in LAPS_DATA_ROOT/time/.
+
+sub help_sub
+{
+    print "USEAGE \n";
+    print "$0 command line options (default values)\n";
+
+    print "-beg_time:        Beginning time of analysis period: [dd-mmm-yyyy-hhmm] \n";
+    print "-end_time:        Ending    time of analysis period: [dd-mmm-yyyy-hhmm] \n";
+    print "-install_root:    Installroot for LAPS binaries\n";
+    print "-dataroot:        Dataroot [output] for analysis products\n";
+    print "-run_sched:       If defined, then run sched.pl. Add in dbl quotes any additional command\n";
+    print "                  line entries desired for sched.pl\n";
+    print "-laps_driver:     Used to run lvd, vrc, lsr, ln3, remap or all\n";
+    print "                  Enter (lvd, vrc, lsr, ln3, remap, or all) depending on your needs.\n";
+    print "                  You will get the intermediate ingest files between each cycle.\n";
+    print "-driver_args:     Additional command line entries (in dbl quotes) if desired for laps_driver.pl\n";
+    print "-wideband_2_nc:   Runs archive II to netcdf conversion - enter path to wideband root.\n";
+    print "                  This converter software only runs on Linux machines.\n";
+    print "-link_tmp_dirs:   Activates module tmplink which softlinks appropriate raw data directories to\n";
+    print "                  the machine specific /tmp directory. Specific IHOP rerun requirement\n";
+    print "-multi_machine:   This switch indicates the need to write file systime.dat to the machine\n";
+    print "                  specific /tmp directory and softlink this to LAPS_DATA_ROOT. This prevents\n";
+    print "                  interference between different machines processing different times for the\n";
+    print "                  same dataroot\n";
+    print " NOTES:\n";
+    print " 1. the number of cycles for post analysis depends on the input beginning, ending, and\n";
+    print "    the cycle time (see dataroot/static/nest7grid.parms LAPS_CYCLE_TIME)\n";
+    exit;
+}
+
+if (!$INSTALL_ROOT||!$DATA_ROOT)
+{ 
+    $INSTALL_ROOT = $ENV{LAPSINSTALLROOT} if (defined $ENV{LAPSINSTALLROOT});
+    $DATA_ROOT = $ENV{LAPS_DATA_ROOT} if (defined $ENV{LAPS_DATA_ROOT});
+    if(!defined $INSTALL_ROOT || !defined $DATA_ROOT)
+    {
+       print "Environment Variables LAPSINSTALLROOT or LAPS_DATA_ROOT not set\n";
+       &help_sub;
+    }
+}
+
+if(length $wideband_2_netcdf == 0 && defined $wideband_2_netcdf){
+   die "you must enter the wideband path (or root): -wideband_2_nc='path'\n";
+}
+
+require "$INSTALL_ROOT/etc/laps_tools.pm";
+
+my @run_ld=split(' ',$lapsdriver);
+
+if(!defined $lapsdriver)
+{
+   print "You did not enter any laps_driver runs (-laps_driver)\n";
+   print "I will sleep for 10 sec ... you might interrupt otherwise I'll continue\n";
+   sleep 10;
+}elsif($run_ld[0] eq "all")
+{
+   @run_ld = qw(lvd vrc lsr ln3 remap);
+}else
+{
+   print "Preparing to run laps_driver for\n";
+   foreach (@run_ld){ print "$_ ";}
+   print "\n";
+}
+
+# the beginning and ending time period for post analysis format dd-mmm-yyyy-hhmm
+#-------------------------------------------------------------------------------------
+my ($dd_beg, $mmm_beg, $year_beg, $hour_beg, $min_beg, $jjj_beg, $hhmm_beg);
+my ($dd_end, $mmm_end, $year_end, $hour_end, $min_end, $jjj_end, $hhmm_end);
+
+if(length ($beg_time) != 16 || length ($end_time) != 16)
+{
+   print "your input time spec format must be dd-mmm-yyyy-hhmm: please re-enter\n";
+   print "where: \n";
+   print "     yyyy = year\n";
+   print "      mmm = month (character) \n";
+   print "       dd = day \n";
+   print "       hh = hour (utc)\n";
+   print "       mm = minute\n";
+   &help_sub;
+}
+else
+{
+   ($dd_beg,$mmm_beg,$year_beg,$hhmm_beg)=split('-',$beg_time);
+   ($dd_end,$mmm_end,$year_end,$hhmm_end)=split('-',$end_time);
+
+   $hour_beg = substr($beg_time,12,2);
+   $min_beg  = substr($beg_time,14,2);
+   $hour_end = substr($end_time,12,2);
+   $min_end  = substr($end_time,14,2);
+
+}
+
+my @remap_times = "00";
+my @lvd_times = qw(00 10 20 30 40 50);
+my @vrc_times = qw(00 10 20 30 40 50);
+my @ln3_times = qw(00 10 20 30 40 50);
+my @lsr_times = qw(00 30);
+my @months = qw(JAN FEB MAR APR MAY JUN JUL AUG SEP OCT NOV DEC);
+
+$mmm_beg=uc $mmm_beg;
+$mmm_end=uc $mmm_end;
+
+print "start time: $beg_time ---> $year_beg,$mmm_beg,$dd_beg,$hour_beg,$min_beg \n";
+print "end time:   $end_time ---> $year_end,$mmm_end,$dd_end,$hour_end,$min_end \n";
+
+my ($imobeg,$imoend);
+while ($mmm_beg ne $months[$imobeg])
+{
+       $imobeg++;
+}
+while ($mmm_end ne $months[$imoend])
+{
+       $imoend++;
+}
+
+my @cycle_time = &laps_tools::get_nl_value("nest7grid.parms","laps_cycle_time",$DATA_ROOT);
+my $cycle_time = $cycle_time[0];
+print "cycle time (seconds): $cycle_time \n";
+print "beginning month  = $months[$imobeg]\n";
+print "ending    month  = $months[$imoend]\n";
+
+# convert beg/end times to i4time since Jan. 1, 1970
+#--------------------------------------------------------
+$imobeg++;
+$imoend++;
+my $i4time70_beg=&laps_tools::date_to_i4time($year_beg,$imobeg,$dd_beg,$hour_beg,$min_beg,'0');
+my $i4time70_end=&laps_tools::date_to_i4time($year_end,$imoend,$dd_end,$hour_end,$min_end,'0');
+print "beginning/ending i4time70. $i4time70_beg, $i4time70_end\n";
+
+if($i4time70_beg > $i4time70_end)
+{
+   print "The beginning time is greater than the ending time!\n";
+   print "Reconsider the input times and try again\n";
+   exit;
+}
+
+my $ncycles = ($i4time70_end-$i4time70_beg)/$cycle_time+1;  #includes beginning and ending time!
+
+print "number of LAPS cycles to run = $ncycles\n";
+
+require "$INSTALL_ROOT/etc/run_sys.pm";
+
+my @laps_driver_exe = qw(vrc_driver.x lvd_sat_ingest.exe lsr_driver.exe ln3_driver.exe remap_polar_netcdf.exe);
+
+my $i4time70=$i4time70_beg;
+my ($year, $yr, $mo, $dy, $hr, $mn, $sc);
+my ($yr2, $mo2, $dy2, $hr2, $mn2, $sc2);
+my ($yrw,$yearw, $mow, $dyw, $hrw, $mnw, $scw);
+my ($year2,$mon2,$dddw,$monw);
+my ($i,$j,$k,$mon,$command);
+my ($laps_driver_exe, $min_ld, $com_ld, $ldexe);
+my ($driver_incr, $driver_cycles, $i4time70_driver, $i4time70_wideband);
+my ($success, $new_casedate, $day_prev, $datatype);
+my $i4time70_driver_end;
+#
+# define and establish casedate links corresponding to the current run
+#----------------------------------------------------------------------------
+if(defined $link_tmp_dirs){
+           $success = &mktmplinks($i4time70);
+           if($success != 1){
+              print "Failed to make /tmp links for ingest data\n";
+              die;
+           }
+}
+my $yrmonday = `date +%F`;
+chomp $yrmonday;
+my $hrmin = `date +%R`;
+chomp $hrmin;
+
+if(defined $multi_machine){
+           if(!-d "/tmp/time"){
+              mkdir "/tmp/time", 0777 or die "Failed to make directory /tmp/time $!\n";
+           }
+           if(!-l "$DATA_ROOT/time/systime.dat"){
+              if(!-e "/tmp/time/systime.dat"){
+                 system("touch /tmp/time/systime.dat");
+              }
+              system("ln -sf /tmp/time/systime.dat $DATA_ROOT/time/systime.dat");
+           }
+           if(!-d "/tmp/laps_casererun_log"){
+              mkdir "/tmp/laps_casererun_log", 0777;
+           }
+
+# preserve the runtime.log file for each run separately for each machine
+           system("ln -sf /tmp/laps_casererun_log/runtime.log.$yrmonday-$hrmin $DATA_ROOT/log/runtime.log");
+}
+
+
+# this is pretty specific and allows the path in remap.nl to work when the
+# scratch disk is scratch2
+# ---------------------------------------------------------------------------
+if(defined $wideband_2_netcdf){ # safety measure
+  my @parts = split "/", $wideband_2_netcdf;
+  if($parts[2] eq "scratch2"){
+    if(-e $wideband_2_netcdf){
+      system("rm -rf  $wideband_2_netcdf");
+      mkdir "/export/scratch2/wideband", 0777;
+    }
+    if(-e "/export/scratch/wideband"){
+      system("rm -rf  /export/scratch/wideband");
+    }
+    system("ln -sf /export/scratch2/wideband /export/scratch/wideband");
+
+  }else{ # remove any previous files within output netcdf subdirectories
+    system("rm -rf  $wideband_2_netcdf/*/netcdf");
+  }
+}
+#-------------------------
+# main loop for casererun
+#-------------------------
+
+my $time_of_run = `date`;
+chomp $time_of_run;
+print "********************************************\n";
+print "Start Rerun: $time_of_run\n";
+print "********************************************\n";
+
+while ($i4time70<=$i4time70_end)
+{
+     $i++;
+     ($year,$mo,$dy,$hr,$mn,$sc)=&laps_tools::i4time_to_date($i4time70);
+     $mon=$months[$mo-1];
+#    $mo++;
+     $mo='0'.$mo while(length($mo)<2);
+     $hr='0'.$hr while(length($hr)<2);
+     $dy='0'.$dy while(length($dy)<2);
+     $mn='0'.$mn while(length($mn)<2);
+     $sc='0'.$sc while(length($sc)<2);
+     $yr=substr($year,2,2);
+
+     if(defined $wideband_2_netcdf){
+
+        my ($ddd,$dddm1,$dddp1,$purgewl,$purgewh);
+        $ddd = &laps_tools::julian($year, $mo, $dy);
+        $dddm1 = $ddd - 1;
+        $dddm1='0'.$dddm1 while(length($dddm1)<3);
+        $dddm1='0'.$dddm1 while(length($dddm1)<3);
+        $purgewl = "$yr$dddm1".'18';
+
+        $dddp1 = $ddd + 1;
+        $dddp1='0'.$dddp1 while(length($dddp1)<3);
+        $dddp1='0'.$dddp1 while(length($dddp1)<3);
+        $purgewh = "$yr$dddp1".'06';
+
+# purge_wideband first - not needed in the loop
+#-------------------------------------------------------
+#       $command = "@PERL@ $INSTALL_ROOT/etc/purge_wideband.pl $purgewl $purgewh $wideband_2_netcdf";
+#       if(-e $wideband_2_netcdf){
+#          print "Running $command\n";
+#          run_sys::run_sys($command);
+#       }else{
+#          print "Not purging wideband; Directory does not exist. $wideband_2_netcdf\n";
+#       }
+
+        $i4time70_wideband = $i4time70 - 2*$cycle_time;
+        while ($i4time70_wideband <= $i4time70){
+              ($yearw,$mow,$dyw,$hrw,$mnw,$scw) = &laps_tools::i4time_to_date($i4time70_wideband);
+               $monw=$months[$mow-1];
+#              $mow++;
+               $dddw = &laps_tools::julian($yearw, $mow, $dyw);
+               $dyw='0'.$dyw while(length($dyw)<2);
+               $mow='0'.$mow while(length($mow)<2);
+               $hrw='0'.$hrw while(length($hrw)<2);
+               $mnw='0'.$mnw while(length($mnw)<2);
+               $scw='0'.$scw while(length($scw)<2);
+               $yrw=substr($yearw,2,2);
+
+# Run wideband_2_netcdf 
+#-------------------------------------------------------
+               if(uc $ENV{MACHINE} eq 'AIX')
+               {
+                  unlink "$INSTALL_ROOT/etc/wideband2nc.com" or die "cant remove $INSTALL_ROOT/etc/wideband2nc.com $!";
+                  open(WDBND_COM, ">$INSTALL_ROOT/etc/wideband2nc.com") or die "cant open $INSTALL_ROOT/wideband2nc.com: $!\n";
+#                 print WDBND_COM "/home/lapb/albers/ihop/radar_scripts/wideband2nc.csh $yearw $mow $dyw $hrw $yrw$dddw $wideband_2_netcdf yes";
+                  print WDBND_COM "$INSTALL_ROOT/etc/wideband2nc.csh $yearw $mow $dyw $hrw $yrw$dddw $wideband_2_netcdf yes";
+                  close WDBND_COM;
+                  sleep 5;
+                  chmod 0755, "$INSTALL_ROOT/etc/wideband2nc.com";
+                  $command = "ssh -i /home/lapb/oplapb/.ssh/wideband_convert_cumulus_dsa cumulus";
+               }
+               else
+               {
+#                 $command ="$INSTALL_ROOT/etc/wideband2nc.csh $yearw $mow $dyw $hrw $yrw$dddw $wideband_2_netcdf yes";
+
+#                 We can potentially read some time information from 'systime.dat' internally from 'wideband2nc.csh' so fewer command line args would be needed.
+#                 With this alternate scenario the 'systime.dat' info can be updated for each hour that we would want to process Archive-II data.
+#                 $command ="$INSTALL_ROOT/etc/wideband2nc.csh $DATA_ROOT no no $INSTALL_ROOT archive $wideband_2_netcdf $yearw $mow $dyw $hrw $yrw$dddw";
+                  $command ="$INSTALL_ROOT/etc/wideband2nc.csh $DATA_ROOT yes no $INSTALL_ROOT archive $wideband_2_netcdf $yearw $mow $dyw $hrw $yrw$dddw";
+               }
+
+               print "Running $command\n";
+               run_sys::run_sys($command);
+
+               $i4time70_wideband+=$cycle_time;
+        }
+
+     }
+
+     if($#run_ld >= 0)
+     {
+        foreach $ldexe (@run_ld)
+        {
+           foreach $laps_driver_exe (@laps_driver_exe)
+           {
+              if(substr($laps_driver_exe,0,3) eq substr($ldexe,0,3))
+              {
+
+                if($laps_driver_exe =~ /^vrc/){
+                   $driver_incr=15;                  #minutes
+                }elsif($laps_driver_exe =~ /^lvd/){
+                   $driver_incr=10;                  #minutes
+                }elsif($laps_driver_exe =~ /^lsr/){
+                   $driver_incr=30;                  #minutes
+                }elsif($laps_driver_exe =~ /^ln3/){
+                   $driver_incr=10;                  #minutes
+                }elsif($laps_driver_exe =~ /^remap/){
+                   $driver_incr=$cycle_time/60;       #minutes
+                }
+
+                $driver_cycles=(($cycle_time/($driver_incr*60))>1)?int($cycle_time/($driver_incr*60)):1;
+#               print "Use laps_driver to run $laps_driver_exe: Increment: $driver_incr; Cycles: $driver_cycles \n";
+
+                $i4time70_driver=$i4time70-($driver_incr*$driver_cycles*60);
+#               $i4time70_driver_end=$i4time70+($driver_incr*$driver_cycles*60);
+
+                $day_prev= $dy;
+
+                while ($i4time70_driver <= $i4time70)   #$k<$driver_cycles)
+                {
+                     ($year2,$mo2,$dy2,$hr2,$mn2,$sc2) = &laps_tools::i4time_to_date($i4time70_driver);
+                     $mon2=$months[$mo2-1];
+                     $dy2='0'.$dy2 while(length($dy2)<2);
+#                    $mo2++;
+                     $mo2='0'.$mo2 while(length($mo2)<2);
+                     $hr2='0'.$hr2 while(length($hr2)<2);
+                     $mn2='0'.$mn2 while(length($mn2)<2);
+                     $sc2='0'.$sc2 while(length($sc2)<2);
+                     $yr2=substr($year2,2,2);
+ 
+#if the current i4time70_driver yields a date that crosses the day boundary
+#then redo the "casedate" link to let the ingest routines know we are
+#looking for data from a different subdirectory (only relevant to the IHOP reruns)
+
+                     if($dy2 ne $day_prev)
+                     {
+                        if(defined $link_tmp_dirs){
+                                   $success = &mktmplinks($i4time70);
+                                   if($success != 1){
+                                      print "Failed to make /tmp links for ingest data\n";
+                                      die;
+                                   }
+                        }
+
+                     }
+
+#remap run matching the systime is no longer skipped, since the previous run will usually catch the window (with 90 minute forward time window)
+#                    if($i4time70_driver == $i4time70 && $laps_driver_exe =~ /^remap/){last;}
+
+                     if(defined $multi_machine){
+                        $com_ld="@PERL@ $INSTALL_ROOT/etc/systime.pl $yr2 $mo2 $dy2 $hr2 $mn2 > /tmp/time/systime.dat";
+                     }else{
+                        $com_ld="@PERL@ $INSTALL_ROOT/etc/systime.pl $yr2 $mo2 $dy2 $hr2 $mn2 > $DATA_ROOT/time/systime.dat";
+                     }
+                     run_sys::run_sys($com_ld);
+
+                     if(defined $driverargs){
+                         $com_ld="@PERL@ $INSTALL_ROOT/etc/laps_driver.pl -L $dy2-$mon2-$year2-$hr2$mn2 $driverargs $laps_driver_exe $INSTALL_ROOT $DATA_ROOT";
+                     }else{
+                         $com_ld="@PERL@ $INSTALL_ROOT/etc/laps_driver.pl -L $dy2-$mon2-$year2-$hr2$mn2             $laps_driver_exe $INSTALL_ROOT $DATA_ROOT";
+                     }
+                     print "Running: $com_ld\n";
+                     run_sys::run_sys($com_ld);
+
+                     $day_prev=$dy2;
+
+                     $i4time70_driver+=($driver_incr*60);
+                }
+              }
+           } 
+        }
+     }
+
+     if(defined $multi_machine){
+        $command = "@PERL@ $INSTALL_ROOT/etc/systime.pl $yr $mo $dy $hr $mn > /tmp/time/systime.dat";
+     }else{
+        $command = "@PERL@ $INSTALL_ROOT/etc/systime.pl $yr $mo $dy $hr $mn > $DATA_ROOT/time/systime.dat";
+     }
+     print "\n";
+     print " ***** Reset or Initialize systime.dat for sched ***** \n";
+     run_sys::run_sys($command);
+
+     print "\n";
+     print "----------------------------------------\n";
+     print "LAPS Cycle $i: Date: $dy-$mon-$yr-$hr$mn:$sc \n";
+     print "----------------------------------------\n";
+
+# run laps sched
+#---------------
+
+     if(defined $runsched)
+     {
+        $time_of_run = `date`;
+        print "\n Start Sched: $time_of_run \n";
+        $command="@PERL@ $INSTALL_ROOT/etc/sched.pl -A $dy-$mon-$year-$hr$mn $runsched $INSTALL_ROOT $DATA_ROOT";
+        run_sys::run_sys($command);
+     }
+
+     $i4time70+=$cycle_time;
+}
+exit;
+#
+# ******************************************************************************
+#
+sub mktmplinks
+{
+
+# define and establish /tmp/casedate links corresponding to the current run
+#----------------------------------------------------------------------------
+
+  my ($i4time70) = @_;
+  my ($year,$month,$day,$hour,$min,$sec)=&laps_tools::i4time_to_date($i4time70);
+
+  my @day;
+  my @mon;
+  my @njdaynoleap = (0,31,59,90,120,151,181,212,243,273,304,334);
+  my @njdayleap = (0,31,60,91,121,152,182,213,244,274,305,335);
+  my @njul_days = @njdaynoleap;
+  if($day == 29 && $month == 2){
+     @njul_days=@njdayleap;
+  }
+
+  my $jy = &laps_tools::get_julian_day($day,$month,$year); 
+
+#this section still requires year boundary work.
+  my ($ndays, $daynum);
+  my $i;
+  my $ii = 0;
+  my $monnum = $month-1;  #variable $monnum is 0-based value for array indexing
+  if($month>1 && $month<12){
+     $ndays = $njul_days[$monnum]-$njul_days[$monnum-1];
+     for ($i=$jy-1;$i<=$jy+1;$i++){
+
+          $daynum=$i-$njul_days[$monnum];
+
+          if($daynum <= 0){
+             $monnum--;
+             $daynum=$i-$njul_days[$monnum];
+          }elsif($daynum > $ndays){
+             $monnum++;
+             $daynum=$i-$njul_days[$monnum];
+          }
+          $monnum++;
+          if(length($daynum) < 2 ){
+             $day[$ii] = "0".$daynum;              # while(length($i)<2);
+          }else{
+             $day[$ii] = "$daynum";
+          }
+          if(length($monnum) < 2){
+             $mon[$ii] = "0".$monnum;         # while(length($month)<2);  !this while construct doesn't work
+          }else{
+             $mon[$ii] = "$monnum";
+          }
+
+          $ii++;
+
+     }
+  }else{
+     print "Sub mktmplinks in casererun.pl does not account for year boundaries\n";
+     die "Terminating\n";
+  }
+
+  my $dirread;
+  my $time_of_term;
+  foreach (@mon){
+           my $dirread = `ls /data/ihop/$_`;
+           if(length $dirread <= 0){
+              print "ERROR: /data/ihop/$_ is not readable!!\n";
+              print "Termininating\n";
+              $time_of_term = `date`;
+              print "\n Time of termination: $time_of_term \n";
+              exit;
+           }
+  }
+
+ my @datatypes=qw(acars/qc
+  dropsonde
+  gpsmet
+  ldad/mesonet
+  maritime
+  metar
+  pirep
+  profiler/rass/noaanet
+  profiler/wind/noaanet
+  profiler/rass/external
+  profiler/wind/external
+  radar/wsi/nowrad
+  raob
+  sao
+  sat/fsl-gs/goes8/raw/image/fsl-conus
+  sat/fsl-gs/goes8/raw/sounding/scan-area
+  sat/nesdis/goes8/wind/cloud-drift/ascii
+  sat/nesdis/goes8/cloudtop/sfov_ihop/ascii
+  sat/ssec/goes8/ascii);
+
+  my ($file,$datatype,$path);
+  system("rm -rf /tmp/casedate");
+  mkdir "/tmp/casedate", 0777;
+  foreach $datatype (@datatypes){
+        $i=0;
+        if($datatype =~ /ascii$/){  # the satellite sfov data is not netcdf
+           $path=$datatype;
+        }else{
+           $path=$datatype."/netcdf";
+        }
+        foreach (@day){
+                 if(-e "/data/ihop/$mon[$i]/$_/data/$path" ){
+                    system("mkdir -p /tmp/casedate/data/$path");
+                    opendir(DATA_TYPE,"/data/ihop/$mon[$i]/$_/data/$path");
+                    my @files=grep /^\d\d/, readdir(DATA_TYPE);
+                    close (DATA_TYPE);
+                    print "Linking files in /data/ihop/$mon[$i]/$_/$path to /tmp/casedate/data \n";
+                    foreach $file (@files){
+                            $result=symlink "/data/ihop/$mon[$i]/$_/data/$path/$file", "/tmp/casedate/data/$path/$file";
+                    }
+                 }else{
+                    next;
+                 }
+                 $i++;
+        }
+ 
+  }
+
+# this section tests if the links established above are valid.
+  foreach $datatype (@datatypes){
+          if(-e "/tmp/casedate/data/$datatype"){
+                 if($datatype =~ /ascii$/){
+                    $datatype =~ s/ascii//;
+                 }
+                 $result = `ls -L /tmp/casedate/data/$datatype`;
+                 chomp;
+                 if($result != "netcdf" || $result != "ascii"){
+                    print "ERROR: Not valid link: /tmp/casedate/data/$datatype\n";
+                 }
+          }else{
+             print "WARNING:  No directory: /tmp/casedate/data/$datatype\n";
+          }
+  }
+
+return 1;
+
+}

@@ -1,0 +1,112 @@
+#!@PERL@
+# @configure_input@
+
+# Looks in logdir (from command line) or $LAPS_DATA_ROOT/log.
+# The other command line argument is the hour of the LAPS run
+# if not current.  Both command line arguments are optional;
+# order doesn't matter.
+
+require '@prefix@/etc/wgi_utils.pm';
+
+$nargs = @ARGV;
+if ($nargs == 0) {}
+elsif ($nargs == 1) {
+ $arg = shift;
+ if ($arg =~ /^[0-9]*$/) {$hr=$arg;}
+ else {$logdir = $arg;}
+ }
+elsif ($nargs == 2) {
+ $arg1 = shift;
+ $arg2 = shift;
+ if ($arg1 =~ /^[0-9]*$/) {$hr=$arg1; $logdir=$arg2;}
+ else {$hr=$arg2; $logdir=$arg1;}
+ }
+ 
+$LAPS_DATA_ROOT = $ENV{LAPS_DATA_ROOT};
+
+if (defined $logdir) {if ($logdir eq $LAPS_DATA_ROOT) {$logdir=$logdir."/log";} }
+elsif (defined $LAPS_DATA_ROOT) {$logdir=$LAPS_DATA_ROOT."/log";}
+else {die "Can't find path to log data.\n";}
+
+if (defined $hr) {$hr="0".$hr if (length($hr)<2);}
+
+print "logdir:  $logdir\nhr:      $hr\n";
+
+# Get the most recent log file.
+
+$logname = "lq3driver";
+$filename = &wgi_utils::get_log_filename($LAPS_DATA_ROOT,$logname,$hr);
+
+open(FILE,$filename) or die "Can't open $filename.";
+@lines = <FILE>;
+print "\nReading from log file $filename\n\n";
+
+# Determine background model.
+# ---------------------------
+
+($modelid,$modeltype,$runtime,$fcsthr,$mdlyr,$mdldy)=&wgi_utils::which_bkgd(@lines);
+
+print "Using $fcsthr fcst from $modelid model started at $runtime UTC \n";
+print "$modeltype $modelid $mdlyr$mdldy$runtime$fcsthr \n";
+
+# Model background, 4dda mode
+
+print "4DDA mode:\n";
+@greplines = grep /4dda/i, @lines;
+print "$greplines[0]";
+print "\n";
+
+# RAOBs
+
+print "RAOBS (Soundings):\n";
+@greplines = grep /raob switch off/, @lines;
+foreach (@greplines) {print "$_";}
+@greplines = grep /No usable RAOB data/, @lines;
+foreach (@greplines) {print "$_";}
+@greplines = grep /Number of RAOBs considered/, @lines;
+foreach (@greplines) {print "$_";}
+@raobtypes = qw(RAOB GOES11 GOES12 POESSND RADIOMTR);
+foreach $raobtype (@raobtypes) {
+    @greplines  = grep /$raobtype/, @lines;
+    @greplines2 = grep /accepting/, @greplines;
+    $numlines = @greplines2;
+    if($numlines > 0){
+        print "    $numlines $raobtype obs accepted\n";
+    }
+}
+print "\n";
+
+# GPS
+print "GPS:\n";
+@greplines = grep /total avial data used/i, @lines;
+print "$greplines[0]";
+print "\n";
+
+# Satellite
+
+print "Satellite:\n";
+@greplines = grep /GOES/, @lines;
+print "$greplines[0]";
+@greplines = grep /sounder/i, @lines;
+print "$greplines[0]";
+@greplines = grep /imager/i, @lines;
+print "$greplines[0]";
+@greplines = grep /tiros/i, @lines;
+print "$greplines[0]";
+@greplines = grep /GVAP records/i, @lines;
+print "$greplines[0]";
+print "\n";
+
+# Cloud analysis
+
+print "Cloud analysis:\n";
+@greplines = grep /Clouds/, @lines;
+print "$greplines[0]";
+print "\n";
+
+# Surface
+
+print "Surface:\n";
+@greplines = grep /Sfc moisture/, @lines;
+print "$greplines[0]";
+print "\n";

@@ -1,0 +1,287 @@
+netcdf lcv {
+
+    dimensions:
+        record = unlimited,
+        z = 1,
+	x = 125,
+	y = 105,
+        nav = 1,
+        namelen = 132;
+		
+    variables:
+        //	LAPS cloud cover
+
+	float                                  
+            lcv(record,z,y,x);
+            lcv:navigation_dim = "nav";
+            lcv:record = "valtime, reftime";
+            lcv:_FillValue = 1.e+37f;
+            lcv:long_name="LAPS cloud cover";
+            lcv:units="none";
+            lcv:valid_range= 0.f, 1.f;
+            lcv:LAPS_var="LCV";
+            lcv:lvl_coord="MSL";
+	    lcv:LAPS_units="UNDIM";
+                	        
+        //	Cloud analysis implied snow cover 
+
+	float                                  
+            csc(record,z,y,x);
+            csc:navigation_dim = "nav";
+            csc:record = "valtime, reftime";
+            csc:_FillValue = 1.e+37f;
+            csc:long_name="Cloud analysis implied snow cover";
+            csc:units="none";
+            csc:valid_range= 0.f, 1.0f;
+            csc:LAPS_var="CSC";
+            csc:lvl_coord="MSL";
+	    csc:LAPS_units="UNDIM";
+                	        
+        //	Cloud analysis implied water temp
+        float 
+            cwt(record,z,y,x) ;
+            cwt:navigation_dim = "nav";
+            cwt:record = "valtime, reftime";
+            cwt:_FillValue = 1.e+37f;
+            cwt:long_name = "Clear Sky Water Temperature" ;
+            cwt:units = "none" ;
+            cwt:valid_range = 100.f, 366.f ;
+            cwt:LAPS_var = "CWT" ;
+            cwt:lvl_coord = "MSL" ;
+            cwt:LAPS_units = "UNDIM" ;
+
+        //	 satellite IR channel 4 b-temp: averaged
+	float                                  
+            s8a(record,z,y,x);
+            s8a:navigation_dim = "nav";
+            s8a:record = "valtime, reftime";
+            s8a:_FillValue = 1.e+37f;
+            s8a:long_name="IR channel 4 (11.2u) b-temp: averaged";
+            s8a:units="degrees Kelvin";
+            s8a:valid_range= 0.f, 400.f;
+            s8a:LAPS_var="S8A";
+            s8a:lvl_coord=" ";
+            s8a:LAPS_units="K";
+
+        //	satellite IR channel 2 b-temp: averaged
+	float                                  
+            s3a(record,z,y,x);
+            s3a:navigation_dim = "nav";
+            s3a:record = "valtime, reftime";
+            s3a:_FillValue = 1.e+37f;
+            s3a:long_name="IR channel 2 (3.9u) b-temp: averaged";
+            s3a:units="degrees Kelvin";
+            s3a:valid_range= 0.f, 400.f;
+            s3a:LAPS_var="S3A";
+            s3a:lvl_coord=" ";
+            s3a:LAPS_units="K";
+                	        
+        //	laps-albedo
+	float                                  
+            alb(record,z,y,x);
+            alb:navigation_dim = "nav";
+            alb:record = "valtime, reftime";
+            alb:_FillValue = 1.e+37f;
+            alb:long_name="laps derived albedo";
+            alb:units="none";
+            alb:valid_range= -1.f, 1.f;
+            alb:LAPS_var="ALB";
+            alb:lvl_coord=" ";
+            alb:LAPS_units=" ";
+
+        //      cloud albedo
+        float
+            cla(record,z,y,x);
+            cla:_FillValue = 1.e+37f;
+            cla:long_name="Cloud Albedo";
+            cla:units="none";
+            cla:valid_range= 0.f, 1.f;
+            cla:LAPS_var="CLA";
+            cla:lvl_coord="MSL";
+            cla:LAPS_units="none";
+
+        //      incoming SW radiation at surface //
+        float
+            swi(record,z,y,x);
+            swi:_FillValue = 1.e+37f;
+            swi:long_name="Incoming SW Radiation";
+            swi:units="w/m{-2}";
+            swi:valid_range= 0.f, 10000.f;
+            swi:LAPS_var="SWI";
+            swi:lvl_coord="AGL";
+            swi:LAPS_units="w/m{-2}";
+                	        
+        //	reflectivity-qc
+	float                                  
+            rqc(record,z,y,x);
+            rqc:navigation_dim = "nav";
+            rqc:record = "valtime, reftime";
+            rqc:_FillValue = 1.e+37f;
+            rqc:long_name="laps reflectivity qc";
+            rqc:units="none";
+            rqc:valid_range= 2.f, 3.f;
+            rqc:LAPS_var="RQC";
+            rqc:lvl_coord=" ";
+            rqc:LAPS_units=" ";
+
+
+        //	LAPS variables
+
+        long
+            imax,
+            jmax,
+            kmax,
+            kdim;
+
+        char
+            lcv_comment(record,z,namelen),
+            csc_comment(record,z,namelen),
+            cwt_comment(record,z,namelen),
+            s8a_comment(record,z,namelen),
+            s3a_comment(record,z,namelen),
+            alb_comment(record,z,namelen),
+            cla_comment(record,z,namelen),
+            swi_comment(record,z,namelen),
+            rqc_comment(record,z,namelen),
+            asctime(record,namelen);
+
+			
+        //	inventory variables
+
+        short
+            lcv_fcinv(record, z);
+            lcv_fcinv:_FillValue= 0s;
+              	
+        short
+            csc_fcinv(record, z);
+            csc_fcinv:_FillValue= 0s;
+              	
+        short
+            cwt_fcinv(record, z);
+            cwt_fcinv:_FillValue= 0s;
+              	
+        short
+            s8a_fcinv(record, z);
+            s8a_fcinv:_FillValue= 0s;
+              	
+        short
+            s3a_fcinv(record, z);
+            s3a_fcinv:_FillValue= 0s;
+              	
+        short
+            alb_fcinv(record, z);
+            alb_fcinv:_FillValue= 0s;
+              	
+        short
+            cla_fcinv(record, z);
+            cla_fcinv:_FillValue= 0s;
+              	
+        short
+            swi_fcinv(record, z);
+            swi_fcinv:_FillValue= 0s;
+              	
+        short
+            rqc_fcinv(record, z);
+            rqc_fcinv:_FillValue= 0s;
+              	
+        //	list of grid levels
+
+        float 
+            level(z);
+            level:long_name="level of data";
+	    level:units = "hectopascals";
+                    	
+        //      validtime of the grid 
+
+        double
+            valtime(record);
+            valtime:long_name = "valid time";
+            valtime:units = "seconds since (1970-1-1 00:00:00.0)";
+
+        //      reference time of the process
+
+        double
+            reftime(record);
+            reftime:long_name = "reference time";
+            reftime:units = "seconds since (1970-1-1 00:00:00.0)";
+
+        //      nice name for originating center
+
+        char
+            origin_name(namelen);
+
+        //      nice name for process
+
+        char
+            process_name(namelen);
+
+        //      nice name for grid description instance
+        char
+            grid_name(namelen);
+
+        //      basic assumption about earth shape
+        char
+            earth_shape(namelen);
+
+        // navigation variables using 
+        // WMO FM 92-VIII Ext.GRIB specification names
+  
+        char    grid_type(nav, namelen);
+                grid_type:long_name = "GRIB-1 grid type";
+  
+        char    x_dim(nav, namelen);
+                x_dim:long_name = "longitude dimension";
+  
+        char    y_dim(nav, namelen);
+                y_dim:long_name = "latitude dimension";
+  
+        short   Nx(nav);
+                Nx:long_name = "number of x points";
+  
+        short   Ny(nav);
+                Ny:long_name =  "number of y points";
+  
+        float   La1(nav);
+                La1:long_name = "first latitude";
+                La1:units = "degrees_north";
+  
+        float   Lo1(nav);
+                Lo1:long_name = "first longitude";
+                Lo1:units = "degrees_east" ;
+    
+        float   LoV(nav);
+                LoV:long_name = "orientation of grid" ;
+                LoV:units = "degrees_east";
+  
+        float   Latin1(nav);
+                Latin1:long_name = "orientation of grid" ;
+                Latin1:units = "degrees_north";
+
+        float   Latin2(nav);
+                Latin2:long_name = "orientation of grid" ;
+                Latin2:units = "degrees_north";
+
+        float   Dx(nav);
+                Dx:long_name = "x grid increment";
+                Dx:units = "meters";
+  
+        float   Dy(nav);
+                Dy:long_name = "y grid increment";
+                Dy:units = "meters";
+  
+        // end of navigation variables
+
+        :Conventions = "NUWG";
+        :history = "created by LAPS Branch of FSL";
+        :record = "valtime, reftime";
+        :title = "LAPS lcv file - LAPS cloud and snow cover";
+        :version = 3;
+
+    data:
+
+        earth_shape     = "spherical radius";
+        grid_name       = "LAPS lcv file - LAPS cloud and snow cover";
+        process_name    = "LAPS - Local Analysis and Prediction System";
+        x_dim           = "x";
+        y_dim           = "y";
+}                       

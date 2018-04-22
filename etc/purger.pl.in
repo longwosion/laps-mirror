@@ -1,0 +1,386 @@
+#!@PERL@
+# @configure_input@
+#
+# Copyright (C) 1998  James P. Edwards
+#
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; either version 2
+# of the License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#
+#
+use strict;
+use English;
+use vars qw($opt_r $opt_t $opt_m $opt_d);
+use Getopt::Std;
+
+getopts('rt:m:d:');
+
+
+my $DATAROOT=shift || die "LAPS_DATA_ROOT required (generally appended by /lapsprd)";
+
+# There are two main ways this script can be used to purge files as described
+# in the following sections of text:
+#
+# 1) Purging a directory tree (either 'lapsprd' or a more general tree)
+#
+# This script purges old data files in directories under the 'lapsprd' 
+# directory.  More generally, it purges one or more levels below the
+# input directory, not in the directory itself. It purges only those files
+# having primarily digits in the name. $hist_time is the age in days of the 
+# oldest files to keep.
+#
+# Command line arguments::
+#
+# -r -m  default maximum number of files to keep in each directory
+#
+# -t  default maximum time (days) to keep files in each directory
+#
+# Overrides can be kept in a file called 'purger.dat' that in the LAPS
+# context is placed in the $TEMPLATE and/or $LAPS_DATA_ROOT/static directory.
+# Each line in this file has three entries 'a b c' where 'a' is the 'lapsprd'
+# subdirectory, 'b' is 'min' or 'max' (not sure how that works myself), and
+# 'c' is the purge time in days. An example line in the file would be...
+#
+# lwc min 1.0
+#
+# 2) Purging a specific directory (having no subdirectories)
+#
+# If the user wants to purge in a $DIR subdirectory (ie., no
+# subdirectories under this) then use "-r" in conjunction with "-t" and
+# input $DIR must not have any subdirectories.
+# For example, "purger.pl -r -t 0.5 /data/laps/lapsprd/lt1" will only
+# purge files in the lt1 directory using -t 0.5 as the input $hist_time.
+# Again, this will not work if there are subdirectories under the input $DIR.
+#
+# Other exceptions can be listed below...
+#
+my(%clean_dirs, $hist_time, $min_files, $log_time);
+
+if($opt_r){
+    if(defined $opt_t){
+       $hist_time = ($opt_t)?$opt_t:1.5;
+    }else{
+       $hist_time = 0;
+       $min_files = ($opt_m)?$opt_m:0;
+    }
+
+    $log_time = 1.5;
+}else{
+    $hist_time = ($opt_t)?$opt_t:1.5;
+#
+# Don't ever completely empty the directories 
+#
+
+    $min_files = ($opt_m)?$opt_m:5;
+
+    $log_time = $hist_time;
+}
+#
+# exceptions - overridden if $min_files==0
+#
+my $wideband_time = 0.04166667;
+my $vxx_time = 0.16;
+my $vrc_time = 0.16;
+my $web_time = 7.0;
+my $verif_time = 60.0;
+my(@radars) = qw(01 02 03 04 05 06 07 08 09 10 11 12 13 14 15 16 17 18 19 20 21 22 
+23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 
+50 51 52 53 54 55 56 57 58 59 60 61 62 63 64 65 66 67 68 69 70 71 72 73 74 75 76
+77 78 79 80 81 82 83 84 85 86 87 88 89 90 91 92 93 94 95 96 97 98 99 100 101 102 
+103 104 105 106 107 108 109 110 111 112 113 114 115 116 117 118 119 120 121 122
+123 124 125 126 127 128 129 130 131 132 133 134 135);
+my(@webdirs) = qw(fw h5b ham llr p01 pbl pw sc td vnt xct fwi hah liw nbe pbe ptt crf rh sto tt wd0 umf als);
+my(@verifdirs) = qw(TSF DSF USF VSF SSF WSF TPW U3 V3 W3 UB VB WB T3 W3 S8A SWI R01 R03 R06 R24 RTO);
+my(@dbzdirs) = qw(20 30 40 50 60);                                 
+my(@pcpdirs) = qw(PCP_01 PCP_03 PCP_06 PCP_24);                                 
+my(@pcpthrdirs) = qw(0001 0005 0010 0050 0100 0200 0500);                                 
+my $radar;
+my $webdir;
+my $verifdir;
+my $dbzdir;
+my $pcpdir;
+my $pcpthrdir;
+my($dir);
+
+if($min_files>0){
+    $clean_dirs{lga} = (0.5<$hist_time)?0.5:$hist_time;
+    $clean_dirs{lgb} = (0.5<$hist_time)?0.5:$hist_time;
+    $clean_dirs{ram} = (0.5<$hist_time)?0.5:$hist_time;
+    $clean_dirs{rsf} = (0.5<$hist_time)?0.5:$hist_time;
+    $clean_dirs{fua} = (0.5<$hist_time)?0.5:$hist_time;
+    $clean_dirs{fsf} = (0.5<$hist_time)?0.5:$hist_time;
+
+    $clean_dirs{lcv} = 2.1 if($hist_time < 2.1);
+    $clean_dirs{l1s} = 2.1 if($hist_time < 2.1);
+    $clean_dirs{lm2} = 1.5 if($hist_time < 1.5);
+    $clean_dirs{lso} = 1.5 if($hist_time < 1.5);
+#   $clean_dirs{lwc} = 0.5;
+
+    foreach $radar (@radars){
+        $dir="v$radar";
+        $clean_dirs{$dir} = $vxx_time;
+        $dir="rdr/0$radar/raw";
+        $clean_dirs{$dir} = $vrc_time;
+        $dir="rdr/0$radar/vrc";
+        $clean_dirs{$dir} = $vrc_time;
+    }
+
+    foreach $webdir (@webdirs){
+        $dir="www/anal2d/archive/$webdir";
+        $clean_dirs{$dir} = $web_time;
+        $dir="www/anal2d/recent/$webdir";
+        $clean_dirs{$dir} = $web_time;
+    }
+
+    foreach $verifdir (@verifdirs){
+        $dir="verif/$verifdir/pt";
+        $clean_dirs{$dir} = $verif_time;
+
+        $dir="verif/$verifdir/pt/comp";
+        $clean_dirs{$dir} = 3.0;
+
+        $dir="verif/$verifdir/pt/comp2";
+        $clean_dirs{$dir} = 3.0;
+    }
+
+#   Set purge time for reflectivity verification directories
+    $dir="verif/REF/plot";
+    $clean_dirs{$dir} = $verif_time;
+    foreach $dbzdir (@dbzdirs){
+        $dir="verif/REF/plot/$dbzdir";
+        $clean_dirs{$dir} = $verif_time;
+    }
+
+    $dir="verif/LMR/plot";
+    $clean_dirs{$dir} = $verif_time;
+    foreach $dbzdir (@dbzdirs){
+        $dir="verif/LMR/plot/$dbzdir";
+        $clean_dirs{$dir} = $verif_time;
+    }
+
+    $dir="verif/LLR/plot";
+    $clean_dirs{$dir} = $verif_time;
+    foreach $dbzdir (@dbzdirs){
+        $dir="verif/LLR/plot/$dbzdir";
+        $clean_dirs{$dir} = $verif_time;
+    }
+
+#   Set purge time for precip Bias/ETS verification directories
+    foreach $pcpdir (@pcpdirs){
+        $dir="verif/$pcpdir/plot";
+        $clean_dirs{$dir} = $verif_time;
+        foreach $pcpthrdir (@pcpthrdirs){
+            $dir="verif/$pcpdir/plot/$pcpthrdir";
+            $clean_dirs{$dir} = $verif_time;
+        }
+    }
+
+    $clean_dirs{'lvd/goes08'} = (0.5<$hist_time)?0.5:$hist_time;;
+    $clean_dirs{'lvd/goes09'} = (0.5<$hist_time)?0.5:$hist_time;;
+    $clean_dirs{'lvd/goes10'} = (0.5<$hist_time)?0.5:$hist_time;;
+    $clean_dirs{'lvd/gmssat'} = (0.5<$hist_time)?0.5:$hist_time;;
+
+    $clean_dirs{dprep} = (0.25<$hist_time)?0.25:$hist_time;;
+    $clean_dirs{lapsprep} = (0.25<$hist_time)?0.25:$hist_time;;
+    $clean_dirs{'model/output'} = (0.25<$hist_time)?0.25:$hist_time;;
+    $clean_dirs{'model/varfiles'} = (0.25<$hist_time)?0.25:$hist_time;;
+    $clean_dirs{'../log'} = $log_time;
+
+    my $purger_datfile;
+    if($opt_d){
+       $purger_datfile = $opt_d;
+    }else{
+       $purger_datfile = "$DATAROOT/../static/purger.dat";
+    }
+
+    if(open(OVERRIDES,"$purger_datfile")){
+       foreach(<OVERRIDES>){
+	next if(/^\#/);
+	if(/^\s*(\S+)\s+(\S+)\s+(\S+)/){
+          my $what =  $1;
+	  my $how= lc $2;
+	  my $when= $3;
+	  if($how eq "min"){
+	    $clean_dirs{$what} = $when;
+	  }else{
+	    $clean_dirs{$what} = ($when<$hist_time)?$when:$hist_time;
+	  }
+	  print "Setting purge for $what from purger.dat to $clean_dirs{$what}\n";
+        }else{
+          print "WARNING: Skipping override $_\n";
+	}
+       }
+       close(OVERRIDES);
+    }
+
+}
+
+
+print "Running $0 for data in $DATAROOT default purge time is $hist_time days \n";
+print "Leave a minimum of $min_files in each directory\n";
+print "Log file purge time is $log_time\n";
+
+
+
+chdir($DATAROOT) || die "could not chdir to $DATAROOT";
+
+if(-d "rdr/wideband"){
+    print "wideband directory exists...\n";
+    opendir(DIR,'rdr/wideband');
+        my(@wideband) = readdir(DIR);
+        print "wideband directory contents are @wideband\n";
+        my ($widebanddir);
+        foreach $widebanddir (@wideband){
+            next if($widebanddir eq '.' || $widebanddir eq '..');
+            $dir="rdr/wideband/$widebanddir/netcdf";
+            $clean_dirs{$dir} = $wideband_time;
+            print "Setting purge for $dir to $clean_dirs{$dir} \n";
+        }
+    closedir(DIR);
+}
+
+my @subdirs = &dodir('.','.');
+foreach (@subdirs){
+    next if($_ eq '.');
+    $_ =~ s/^\.\///;
+    $clean_dirs{$_} = $hist_time if(-d $_  && !$clean_dirs{$_});
+}
+
+if ($#subdirs == 0){
+    $dir = "./";
+    $clean_dirs{$dir} = $hist_time;
+}
+
+foreach $dir (keys(%clean_dirs)){
+    my(@fullfilelist,@filelist,@corelist,@listoffiles,$i,$j);
+    opendir(DIR,$dir);
+
+#original constructs
+#   if($dir eq '../log'){
+#       @filelist = grep(/\d\d$/, readdir(DIR));
+#   }else{
+#       @filelist = grep(/^\d\d/, readdir(DIR));
+#   }
+
+# possibly more generic form for gathering filenames to purge (JS 11-5-00). 
+
+    @fullfilelist = readdir(DIR);
+    @filelist = grep(/\d\d\d\d/, @fullfilelist);
+    if($dir =~ "log"){
+        @corelist = grep(/core/, @fullfilelist);
+        print "Adding corelist @corelist to filelist\n";
+#       system("ls -l $dir/core*");
+        push (@filelist,@corelist);
+#       print "filelist is @filelist\n";
+    }
+
+    closedir(DIR);
+    next unless(-d $dir);
+    print "Purging in $dir $clean_dirs{$dir}\n";
+    my $min_files2 = $min_files;
+    if($dir =~ "verif\/" && ($dir =~ "\/pt" || $dir =~ "\/plot") && $dir =~ /\d\d\d\d\d\d\d\d\d/){ 
+        if($#filelist == 0){ 
+            print "Exception - removing empty verif directory $dir\n";
+            system("rmdir $dir") ;
+        }else{
+            print "Exception - verif directory with files $dir\n";
+            $min_files2 = 0;
+        }
+    }
+    next if($#filelist < $min_files2);
+    $i=$#filelist;
+    my($file, $age,$age_thresh);
+    foreach $file (sort @filelist){
+        stat("$dir/$file");
+        $age = -M _;
+	next if(-d "$dir/$file");
+        next if($dir =~ "save");
+
+        if($file =~ "\.wgi\."){ # exception for wgi files 
+            if($clean_dirs{$dir} > 2.0){
+                $age_thresh = $clean_dirs{$dir};
+            }else{
+                $age_thresh = 2.0;
+            }
+        }else{ # non-WGI file
+            $age_thresh = $clean_dirs{$dir};
+        }
+
+        if($dir =~ "verif\/" && ($dir =~ "\/pt" || $dir =~ "\/plot") && $dir =~ /\d\d\d\d\d\d\d\d\d/){ 
+#           print "resetting $age_thresh to $verif_time for $file\n";
+            $age_thresh = $verif_time;
+        }
+
+        if($age > $age_thresh && $i >= $min_files2){
+            $i--;
+            print "Removing file $dir/$file $age $clean_dirs{$dir}\n";
+            system("rm -f $dir/$file") ;
+        }else{
+#           print "Keeping file $dir/$file $age $clean_dirs{$dir}\n";
+	}         
+    }
+}
+
+sub dodir {
+    my($dir,$pattern,$nlink) = @_;
+    my($dev,$ino,$mode,$subcount);
+    my(@dirlist);
+    ($dev,$ino,$mode,$nlink) = stat('.') unless $nlink;
+
+
+    opendir(DIR,'.');
+    my(@filenames) = readdir(DIR);
+    closedir(DIR);
+
+    if($nlink==2){                  # directory with no subs
+	for (@filenames){
+	    next if(/^[\.]+$/);
+#            print $_,"\n";
+            if($_ =~ $pattern){
+#		print "$dir/$_\n";
+		push(@dirlist,$dir);
+		last;
+	    }
+	}
+    }else{
+	$subcount = $nlink-2;
+        my($found)=0;
+	for(@filenames) {
+	    next if(/^[\.]+$/);
+	    my $name = "$dir/$_";
+	    if(($_ =~ $pattern) && $found==0){
+#		print $name,"\n";
+                $found++;
+		push(@dirlist,$dir);
+		
+	    }
+	    next if $subcount == 0;
+
+	    ($dev,$ino,$mode,$nlink) = lstat($_);
+
+	    next unless -d _;
+	    
+	    chdir $_ || die "Can't cd to $name\n";
+	    push(@dirlist,&dodir($name,$pattern,$nlink));
+	    chdir '..';
+	    --$subcount;
+	}
+    }
+    return(@dirlist);
+}
+
+
+
+
+
+

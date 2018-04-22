@@ -1,0 +1,205 @@
+#!@PERL@
+# @configure_input@
+
+# Looks in logdir (from command line) or $LAPS_DATA_ROOT/log.
+# The other command line argument is the hour of the LAPS run
+# if not current.  Both command line arguments are optional;
+# order doesn't matter.
+
+require '@prefix@/etc/wgi_utils.pm';
+
+$nargs = @ARGV;
+if ($nargs == 0) {}
+elsif ($nargs == 1) {
+ $arg = shift;
+ if ($arg =~ /^[0-9]*$/) {$hr=$arg;}
+ else {$logdir = $arg;}
+ }
+elsif ($nargs == 2) {
+ $arg1 = shift;
+ $arg2 = shift;
+ if ($arg1 =~ /^[0-9]*$/) {$hr=$arg1; $logdir=$arg2;}
+ else {$hr=$arg2; $logdir=$arg1;}
+ }
+ 
+$LAPS_DATA_ROOT = $ENV{LAPS_DATA_ROOT};
+
+if (defined $logdir) {if ($logdir eq $LAPS_DATA_ROOT) {$logdir=$logdir."/log";} }
+elsif (defined $LAPS_DATA_ROOT) {$logdir=$LAPS_DATA_ROOT."/log";}
+else {die "Can't find path to log data.\n";}
+
+if (defined $hr) {$hr="0".$hr if (length($hr)<2);}
+
+# Get the most recent log file.
+
+$logname = "wind";
+$filename = &wgi_utils::get_log_filename($LAPS_DATA_ROOT,$logname,$hr);
+
+open(FILE,$filename) or die "Can't open $filename.";
+@lines = <FILE>;
+close FILE;
+print "\nReading from log file $filename\n\n";
+
+# Determine analysis validtime.
+$searchstring = "systime =";
+foreach (@lines) {
+  if (/$searchstring(.*)/) {
+    ($validtime) = split(" ",$1); 
+    last; } 
+}
+
+print "ANALYSIS VALID TIME (yydddhhmm): $validtime UTC\n\n";
+
+# Determine background model.
+# ---------------------------
+($modelid,$modeltype,$runtime,$fcsthr,$mdlyr,$mdldy)=&wgi_utils::which_bkgd(@lines);
+
+print "Using $fcsthr fcst from $modelid model started at $runtime UTC \n";
+print "$modeltype $modelid $mdlyr$mdldy$runtime$fcsthr \n";
+
+# Doppler radars.
+# ---------------
+
+print "\nDoppler radars:  ";
+$searchstring = "Retrieved radar Names: ";
+$found = 0;
+foreach (@lines) {
+  if (/$searchstring(.*)/) {
+    print "$1\n"; $found=1; last; }}
+if ($found == 0) {print "none\n";}
+
+@greplines = grep /multi-doppler grid points/, @lines;
+print "   $greplines[0]";
+
+#Print list of profiletypes (only if present)
+@profiletypes = qw(PROFILER RAOB VAD DROPSND TOWER SODAR);
+foreach $profiletype (@profiletypes) {
+# Print $profiletype (only if present)
+  $i=0; $iprint=0; $ihead=0;
+  foreach (@lines) {
+    if (/Remapping profile/ && /$profiletype/) {
+      @list = split;
+      if($ihead == 0){print "\n$profiletype\s: "; $ihead=1;}
+      print "$list[7] "; $iprint=$iprint+1;
+      if ($iprint > 11) {print "\n        "; $iprint=0;} 
+      $i=$i+1; 
+    }
+  }
+  if($iprint > 0){print "\n";}
+}
+
+# SAO's (METAR's).
+
+$searchstring = "Mapping Sfc Obs";
+$i=0; $found=0;
+$nlines = @lines;
+foreach (@lines) {
+  if (/$searchstring/) {$found=1; last;}
+  else {$i=$i+1;} }
+
+if ($found == 1) {
+  $end=0;
+  $i=$i+2;
+  while ($end == 0) {
+    if (($lines[$i] =~ /Elapsed/) || ($i>=$nlines)) {$end=1;}
+    else {
+      ($num,$name,$lapsi,$lapsj) = split (' ',$lines[$i]) ;
+#     ($dummy,$num,$name,$lapsi,$lapsj) = split /\s+/,$lines[$i] ;
+      if ($lapsi > 0) {push(@saos,$name); } }
+    $i=$i+1; } }
+
+print "\nSfc:   ";
+$nsao = @saos;
+if ($nsao == 0) {print "none";}
+else {
+  @saos = sort(@saos);
+  $count=0;
+  foreach (@saos) {
+    print "$_ "; 
+    $count=$count+1;
+    if ($count > 12) {print "\n       "; $count=0; } } }
+print "\n";
+
+# ACARS and cloud-drift winds.
+
+$searchstring = "Cumulative # obs =";
+$found1 = 0;
+$found2 = 0;
+foreach (@lines) {
+  if (/$searchstring(.*)/) {
+    if ($found1 == 0) {
+      $found1 = 1; $nacars = $1 + 0; }
+    else {
+      $found2 = 1; $nclouddriftwinds = $1 - $nacars; last; } } }
+
+$searchstring = "# of WISDOM obs =";
+$found3 = 0;
+foreach (@lines) {
+  if (/$searchstring(.*)/) {
+    $found3 = 1;
+    $nwisdom = $1 + 0; 
+    $nacars = $nacars - $nwisdom
+  }
+}
+
+print "\nACARS:  ";
+if ($found1 == 1) {print "$nacars \n";}
+else {print "none \n";}
+
+print "\nCloud-drift winds:  ";
+if ($found2 == 1) {print "$nclouddriftwinds \n";}
+else {print "none \n";}
+
+print "\nWISDOM:  ";
+if ($found3 == 1) {print "$nwisdom \n";}
+else {print "none \n";}
+
+print "\n";
+
+print "Observation QC:\n";
+@greplines = grep /QC/, @lines;
+$nlines=0;
+foreach (@greplines) {
+  if (/GOOD/) {
+    @list=split;
+    $src=$list[2]; $good=$list[6]; $bad=$list[7]; $pct=$list[11];
+
+    if ($nlines < 5) {
+      print "$src:  $good good, $bad bad, $pct\% rejected\n";
+    }else{
+      $iradar = $nlines-4;
+      print "$src $iradar:  $good good, $bad bad, $pct\% rejected\n";
+    }
+
+    $nlines=$nlines+1; if ($nlines==999) {last;}
+  }
+}
+print "\n";
+
+print "Obs minus First Guess, before QC, radar is unfiltered (m/s):\n";
+@greplines = grep /BIAS\/RMS/, @lines;
+$src=""; $nobs="obs"; $speedbias="speed bias"; $vecrms="vector RMS"; $ubias="U Bias"; $vbias="V Bias"; $urms="RMS U"; $vrms="RMS V";
+write;
+foreach (@greplines) {
+ if (/FG/) {
+  @list = split; $src = $list[2];
+  ($label,$statstring) = split /\=/, $_ ;
+  ($dummy0,$nobs,$ubias,$vbias,$speedbias,$urms,$vrms,$vecrms) = split /\s+/, $statstring;
+  write;
+  }  }
+
+print "\nObs minus LAPS Analysis, after QC, radar is unfiltered (m/s):\n";
+$src=""; $nobs="obs"; $speedbias="speed bias"; $vecrms="vector RMS"; $ubias="U Bias"; $vbias="V Bias"; $urms="RMS U"; $vrms="RMS V";
+write;
+foreach (@greplines) {
+ if (/LAPS/) {
+  @list = split; $src = $list[2];
+  ($label,$statstring) = split /\=/, $_ ;
+  ($dummy0,$nobs,$ubias,$vbias,$speedbias,$urms,$vrms,$vecrms) = split /\s+/, $statstring;
+  write;
+  }  }
+
+format STDOUT =
+  @|||||  @|||||  @|||||||||  @||||||||| @|||||||| @|||||||| @|||||||| @||||||||
+$src, $nobs, $speedbias, $vecrms, $ubias, $vbias, $urms, $vrms
+.

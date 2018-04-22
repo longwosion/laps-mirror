@@ -1,0 +1,55 @@
+
+
+main                                                     laps_cloud.f
+    laps_cloud_sub                                       laps_cloud_sub.f
+        get_modelfg                                      get_fg_cloud.f
+            rh_to_cldcv                                  lib/rh2cld.f
+        read_multiradar_3dref                            lib/getradar.f
+        insert_sao                                       lib/insertsao.f
+            read_surface_sa                              lib/read_surface_sa.f
+                read_cloud_obs                               "
+            modify_sounding                                  "
+            get_layer_cover                              lib/insertsao.f
+            spread2                                      lib/spread.f
+        insert_pireps                                    lib/insertpireps.f
+            spread2                                      lib/spread.f
+        insert_co2ctp                                    insert_co2ctp.f
+        barnes_r5                                        barnes_r5.f
+        qc_clouds_3d                                     laps_cloud_sub.f
+        GET_SAT_DATA (read 11 & 3.9 micron)              get_sat_data.f
+            get_laps_2dvar                               lib/laps_io.f
+                get_laps_sat                                 "
+                    get_laps_lvd                             "
+        qc_clouds_3d                                     laps_cloud_sub.f
+        get_vis      (read vis data)                     getvis.f
+            get_laps_2dvar                               lib/laps_io.f
+                get_laps_sat                                 "
+                    get_laps_lvd                             "
+            get_sfc_albedo                               getvis.f
+            albedo_to_cloudfrac2
+        GET_ISTAT_39 (cloud mask from 3.9u)              get_istat_39.f
+        qc_clouds_3d                                     laps_cloud_sub.f
+        insert_sat   (add based on IR/3.9u)              insertsat.f
+            correlation                                      "  
+            cloud_top                                        "
+            correct_cover                                    "
+                get_band8_cover                              "
+            compare_radiation                                "
+                apply_correction                             "
+                cvr_to_tb8_effective                     lib/cloud/cvr_to_tb8_effective.f
+        qc_clouds_3d                                     laps_cloud_sub.f
+        get_max_ref
+        insert_radar                                     insertradar.f
+        cloud_var                                        lib/cloud/cloud_var.F90
+        get_parallax_info                                laps_cloud_sub.f
+        insert_vis   (subtract based on vis/3.9u)        insertvis.f
+        compare_cloud_radar                              laps_cloud_sub.f
+        put_clouds_3d
+        put_clouds_2d
+        cloud_snow_cvr
+        compare_analysis_to_saos                         laps_cloud_sub.f
+        read_surface_sa                                  lib/read_surface_sa.f
+        compare_analysis_to_rad                          compare_analysis_to_rad.f
+            stats_1d                                     stats_1d.f
+        array_plot
+        get_cloud_deriv                                  lib/get_cloud_deriv.f

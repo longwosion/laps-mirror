@@ -1,0 +1,99 @@
+
+             TREE DIAGRAM for laps_sfc.x modules
+             ___________________________________
+
+
+Subroutine Name                                File Name
+...............                                .........
+
+main                                           laps_sfc.f
+    read_namelist_laps                         lib/modules/mem_namelist.f90
+    laps_sfc_sub                               laps_sfc_sub.f
+        read_surface_data                      lib/read_surface_obs.f
+        read_sfc_snd                           lib/read_snd_data.f
+        bkgwts                                 lib/laps_routines.f
+        get_bkgwind_sfc                             "
+        get_background_sfc                          "
+            get_modelfg_2d                     lib/get_maps_lapsgrid.f
+                get_modelfg_3d_sub                  "
+                    qc_field_2d                lib/qc_field_3d.f
+        qcdata                                 qc_data.f
+            dev_ck                                  "
+            bkg_chk                                 "
+        read_sfc_verif_history                 lib/laps_routines.f
+        sfc_verif_qc                                "
+        apply_qc_info                          lib/apply_qc_info.f
+        mdat_laps                              mdatlaps.f
+            splie2                                  "
+            splin2                                  "
+            alt_2_sfc_p                        lib/laps_routines.f
+            reduce_p                                "
+            get_laps_2dvar                     lib/laps_io.f     
+            put_winds                          mdatlaps.f
+            put_thermo                              "
+            procar                                  "
+            set_boundary                            "
+                dynamic_wts                    lapsvanl_sub.f
+                barnes_wide                         "
+        laps_vanl                              lapsvanl.f
+            zero                                    
+            get_modelfg_3d                     lib/get_maps_lapsgrid.f     
+            mean_lapse                         lib/laps_routines.f
+            mean_pressure                           "
+            spline (t,td)                      lapsvanl_sub.f
+                barnes_multivariate_sfc        barnes_multivariate_sfc.f
+            add                               
+            spline (u,v,red_p,mslp)            lapsvanl_sub.f
+                barnes_multivariate_sfc        barnes_multivariate_sfc.f
+            pstn_anal                          lib/laps_routines.f
+            spline (vis)                       lapsvanl_sub.f
+                barnes_multivariate_sfc        barnes_multivariate_sfc.f
+            barnes_multivariate_sfc_jacket          "
+                barnes_multivariate_sfc             "
+            nonlin                             lapsvanl_sub.f
+            frict                                   "
+            leib                                    "
+            stats                              lib/laps_routines.f
+            vortdiv                            lib/util/windfields.f
+            meso_anl                           lib/laps_routines.f
+            vlog2vis                           visibility.f
+            hum                                lib/hum.f
+            enhance_vis                        visibility.f
+                get_vismods                         "
+            lp_fire_danger                     lib/laps_routines.f
+            heat_index                              "
+            write_laps_data                 
+            verify                             lib/laps_routines.f
+                splie2                              "
+                splin2                              "
+
+
+
+The initial constant threshold QC is done with 'qc_data.f' with the background 
+comparison happening in 'bkg_chk'
+
+If 'barnes_multivariate_sfc_jacket' is called the stddev QC ob flagging
+is performed within that routine.
+
+If 'spline' is called the stddev QC ob flagging is performed in the 'spline'
+routine.
+
+.........................PLEASE IGNORE THE INTERNAL NOTES BELOW.....................
+
+mdatlaps.f:	subroutine put_winds(u_in,v_in,max_stn,num_sta,u,v,wwu,wwv,icnt,
+lapsvanl_sub.f:c=====  Here are John's subroutines...(abandon hope, ye who enter)
+lapsvanl_sub.f:	subroutine channel(u,v,topo,imax,jmax,top,pblht,dx,dy,
+lapsvanl_sub.f:	subroutine meso_anl(u,v,p,t,td,theta,dx,dy,q,qcon,qadv,
+lapsvanl_sub.f:	subroutine barnes2(t,imax,jmax,to,smsng,mxstn,npass,fnorm)
+lapsvanl_sub.f:	subroutine bounds(x,imax,jmax)
+lapsvanl_sub.f:	subroutine make_cssi(t,td,pmsl,u,v,cssi,ni,nj,badflag)
+lapsvanl_sub.f:	subroutine windconvert(uwind,vwind,direction,speed,
+lapsvanl_sub.f:	subroutine calc_beta(d,obs_error,beta)
+laps_routines.f:	subroutine find_ij(lat_s,lon_s,lat,lon,numsta,mxsta,
+laps_routines.f:	subroutine extract(a,imax,jmax,i,j,ix,jy)
+laps_routines.f:	subroutine decompwind_gm(dd,ff,ucomp,vcomp,status)
+laps_routines.f:      subroutine stats(x,ni,nj)
+laps_routines.f:	subroutine clouds(imax,jmax,topo,t,smsng,tb8,
+laps_routines.f:      subroutine aplot(field, ni, nj)
+laps_routines.f:       subroutine check_field_2d(x,ni,nj,fill_val,istatus)
+laps_routines.f:      subroutine interp_to_sfc(sfc_2d,field_3d,heights_3d,ni,nj,nk,

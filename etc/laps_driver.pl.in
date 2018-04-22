@@ -1,0 +1,428 @@
+#!@PERL@
+# @configure_input@
+#
+# laps_driver.pl
+#
+# Ensures that no more than $plimit  processes with the same name exist(s)  
+# exits with a warning to stderr if the limit is exceeded  
+#
+# Copyright (C) 1998  James P. Edwards
+#
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; either version 2
+# of the License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#
+#
+# Command line arguments
+#
+# -g                   Run for archive time, specified by number of seconds since
+#                      Jan 1 1970 at 0000 UTC; used for archive time on log filename.
+#
+# -L                   Run for input analysis time specified as dd-mmm-yyyy-hhmm
+#                      which can also substitute for archive time (Eg., 28-Aug-2002-1200)
+#                      used for archive time on log filename
+#
+# -q  P                Use QSUB (SGE syntax on ZEUS) where P is the project name
+#
+# -Q  P                Use QSUB (SGE syntax on JET) where P is the project name
+#
+# -u                   Input a umask to override the default of 002
+#
+# -w                   Submits via qsub_wait to wait for processes to finish before exiting
+#                      (default without -w submits via qsub to background)
+#
+# -n                   Node type to be used with -q (default=hcomp)
+#
+# -e  e1,e2,...        Environment variables (if any) to pass into the executable
+#
+# -l                   Write log files to LAPS_DATA_ROOT/log, even if on AWIPS..
+#
+# third to last arg    Executable name
+#
+# second to last arg   $LAPSINSTALLROOT, one level above bin directory
+#
+# last arg             $LAPS_DATA_ROOT, path to data directory
+#                      purger (see call to purger.pl)
+#
+
+use strict;
+use vars qw($opt_L $opt_g $opt_o $opt_e $opt_l $opt_q $opt_Q $opt_n $opt_u $opt_w);
+use Getopt::Std;
+
+getopts('e:lwq:Q:n:L:g:u:');
+
+#flush buffer; ie., prevent buffering of output
+$|=1;
+
+my $exe = shift || die "Program name and LAPS root directory required";
+my $args = " ";
+my $LAPSROOT=shift || die "LAPS root directory required";
+require "$LAPSROOT/etc/fxa.pm";
+
+if(defined $opt_u){
+    umask $opt_u;
+}else{
+    umask 002;
+}
+
+my $fxa_sys =  &Get_env'fxa; #'
+$ENV{PATH}.=":@NETCDF@/bin";
+$ENV{LAPS_DATA_ROOT} = shift ;
+$ENV{LAPS_DATA_ROOT} = "$LAPSROOT/data" if ! $ENV{LAPS_DATA_ROOT};
+my $LAPS_DATA_ROOT = $ENV{LAPS_DATA_ROOT};
+
+my $exedir = "bin";
+
+if($exe eq "wideband2nc.csh"){ # command line args for realtime runs
+    $args = "$LAPS_DATA_ROOT no yes $LAPSROOT realtime";
+    $exedir = "etc";
+}
+
+if($opt_e){
+    foreach(split(/,/,$opt_e)){
+	/^(\w+)=(\w+)$/;
+	$ENV{$1} = $2;
+    }
+}
+
+
+my($LAPS_LOG_PATH);
+if(($fxa_sys!=0)and(! $opt_l)){
+    $LAPS_LOG_PATH = &Set_logdir'fxa; #'
+}else{
+    $LAPS_LOG_PATH = "$LAPS_DATA_ROOT/log";
+}
+
+#
+# Make sure the requested program exists
+#
+unless(-x "$LAPSROOT/$exedir/$exe"){
+    die "Program $LAPSROOT/$exedir/$exe not found or not executable";
+}
+
+#
+# Construct 'yyjjjhhmm' for the current time
+#
+require "$LAPSROOT/etc/laps_tools.pm";
+
+my $archive_time = -99;  #insures that we don't force $yyjjjhhmm to the nearest cycle
+#                         when calling &laps_tools::systime below.
+
+$archive_time = $opt_g if(defined $opt_g);
+
+my @cycle_time=&laps_tools::get_nl_value("nest7grid.parms","laps_cycle_time",$LAPS_DATA_ROOT);
+my $cycle_time = ($cycle_time[0]>0)?$cycle_time[0]:3600;
+
+my @MON = qw(JAN FEB MAR APR MAY JUN JUL AUG SEP OCT NOV DEC);
+my $LAPS_LOCK_PATH = $LAPS_LOG_PATH;
+
+if(defined $opt_L){
+   if(length($opt_L) != 16){
+      print "USEAGE: use -L to input time with the following format\n";
+      print "dd-mmm-yyyy-hhmm. Eg., 28-Aug-2002-1200 \n";
+      exit;
+   }
+   my $mon=0;
+   my ($day,$month,$year,$hoursmin)=split /\-/, $opt_L;
+   my $hours   = substr($hoursmin,0,2);
+   my $minutes = substr($hoursmin,2,2);
+   foreach (@MON){
+       if($_ eq (uc $month)){last;}
+       $mon++;
+   }
+   $mon=$mon+1;
+   $mon="0".$mon if(length($mon)<2);
+
+   $archive_time = &laps_tools::date_to_i4time($year,$mon,$day,$hours,$minutes,"00");
+   if(-e "/tmp/laps_casererun_log"){
+      $LAPS_LOCK_PATH = "/tmp/laps_casererun_log";
+   }
+
+}
+
+#this for logfile names only.
+#---------------------------
+my $delay_time = 0;
+my $yyjjjhhmm=&laps_tools::systime($LAPS_DATA_ROOT,$delay_time,$cycle_time,$archive_time);
+
+my $log = $exe;
+#$log =~ s/\..*$/\.log\.$hhmm/;
+$log =~ s/\..*$/\.log\.$yyjjjhhmm/;
+open(SAVEOUT,">&STDOUT");
+open(SAVEERR,">&STDERR");
+open(STDOUT, ">$LAPS_LOG_PATH/$log") || die "Can't redirect stdout to $LAPS_LOG_PATH/$log";
+open(STDERR, ">&STDOUT") || die "Can't dup stdout";
+select(STDERR); $| = 1;
+select(STDOUT); $| = 1;
+#
+# Look for a previous lock for this exe in the log directory
+#
+
+
+
+
+my(@locks);
+opendir(LOCKDIR,"$LAPS_LOCK_PATH");
+@locks = grep /^\.lock$exe/, readdir(LOCKDIR);
+closedir(LOCKDIR);
+
+foreach(@locks){
+    $_ =~ /^\.lock$exe\.(\d+)$/;
+    my $jpid = $1;
+    open(LFH,"$LAPS_LOCK_PATH/$_");
+    my $cid = <LFH>;
+    close(LFH);
+    next unless ($cid>1);
+    open(PS,"ps -ef |");
+    my @ps = <PS>;
+    close(PS);
+#
+# Kill any children of the child
+#
+    foreach(@ps){
+	if ($_ =~ /\s+(\d+)\s+$cid\s+/){
+	    print "Killing process $1\n";
+	    kill -9,$1;
+	}
+    }
+#
+# Kill the child
+#    
+    print "WARNING Found LOCK file for $exe with pid $jpid and child $cid - killing process $cid\n";
+    kill -9,$cid if($cid>0);
+    unlink "$LAPS_LOCK_PATH/$_";
+}
+
+my $lockfile = "$LAPS_LOCK_PATH/\.lock$exe\.$$";
+
+#open(LOCK,">$lockfile");
+#close(LOCK);
+
+my $command;
+my $t;
+my $node_type = "hcomp";
+
+my ($ngroups,$igroup);
+if($exe eq "remap_polar_netcdf.exe"){
+    my @groups=&laps_tools::get_nl_value("remap.nl","n_groups","$LAPS_DATA_ROOT"); 
+    $ngroups = $groups[0];
+}else{
+    $ngroups = 1;
+}
+
+if($opt_q || $opt_Q){
+    if($opt_n){
+        $node_type = $opt_n;
+    }
+
+    $igroup = 1;
+    while ($igroup le $ngroups){
+
+      my $qsubfile;
+
+      if($ngroups > 1){
+        $qsubfile = substr($exe,0,5)."_$igroup.sh";
+      }else{
+        $qsubfile = "$exe.sh";
+      }
+
+      print $t." Opening $LAPS_LOG_PATH/$qsubfile starting with executable $exe\n";
+      open(TFILE,">$LAPS_LOG_PATH/$qsubfile");
+
+      my @xdim=&laps_tools::get_nl_value("nest7grid.parms","nx_l","$LAPS_DATA_ROOT"); 
+      my @ydim=&laps_tools::get_nl_value("nest7grid.parms","ny_l","$LAPS_DATA_ROOT"); 
+      my @zdim=&laps_tools::get_nl_value("nest7grid.parms","nk_laps","$LAPS_DATA_ROOT"); 
+      my $npts    = $xdim[0] * $ydim[0] * $zdim[0];
+      my $npts_xy = $xdim[0] * $ydim[0];
+
+      my ($walltime,$vmem_gb);
+
+      if($exe eq "gridgen_model.exe"){ # allow localization to have more time
+          $walltime = "01:00:00";
+          $vmem_gb = 0.;
+
+      }elsif($exe eq "remap_polar_netcdf.exe"){
+          $walltime = "00:15:00";
+          $vmem_gb = 1.1 + ($npts / 16000000.);
+          if ($vmem_gb > 12.0) { $vmem_gb = 12.0; }
+          print "x/y/zdim = $xdim[0] $ydim[0] $zdim[0], npts = $npts, vmem_gb = $vmem_gb\n";
+
+      }elsif($exe eq "lvd_sat_ingest.exe" && $npts_xy > 15000000){
+          $vmem_gb = 4.0;
+          $walltime = "00:10:00";
+
+      }elsif($exe eq "ensemble_mean.exe"){
+          $walltime = "00:15:00";
+          $vmem_gb = 1.6;
+
+      }else{
+          $walltime = "00:10:00";
+          $vmem_gb = 1.6;
+
+      }
+
+#     if($opt_q){     
+#       print TFILE "#!/bin/sh --login\n";
+#       print TFILE "#PBS -lnodes=1:$node_type,walltime=$walltime -A $opt_q\n";
+
+      if($opt_Q){ # JET syntax
+        print TFILE "#!/bin/sh\n";
+        print TFILE "#\$ -pe $node_type 1\n";
+
+        if($vmem_gb > 0.){                                            
+            print TFILE "#\$ -l h_rt=$walltime,h_vmem=".$vmem_gb."G\n";
+        }else{
+            print TFILE "#\$ -l h_rt=$walltime\n";
+        }
+
+        print TFILE "#\$ -A $opt_Q\n";
+        print TFILE "#\$ -S /bin/sh\n";
+        print TFILE "#\$ -cwd\n";
+
+      }elsif($opt_q){ # ZEUS syntax
+        print TFILE "#!/bin/sh --login\n";
+        print TFILE "#PBS -l procs=1\n";
+        print TFILE "#PBS -l walltime=$walltime\n";
+
+        if($vmem_gb > 0.){                                            
+            my $vmem_mb = int($vmem_gb * 1000.);
+            print TFILE "#PBS -l vmem=$vmem_mb"."M\n";
+        }
+
+        print TFILE "#PBS -m n\n";
+        print TFILE "#\PBS -A $opt_q\n";
+
+      }
+
+      print TFILE "  \n";
+#     if($opt_q){
+#       print TFILE "export PBS_MODE=1\n";
+#     }
+      print TFILE "  \n";
+      print TFILE "module load pgi netcdf/3.6.3\n";
+      print TFILE "  \n";
+      print TFILE "cd $LAPS_LOG_PATH\n";
+      print TFILE "  \n";
+      print TFILE "export LAPS_DATA_ROOT=$LAPS_DATA_ROOT\n";
+
+      print " Adding to $LAPS_LOG_PATH/$qsubfile with executable/nodes $exe $opt_q\n";
+      print TFILE "  \n";
+      if($exe eq "remap_polar_netcdf.exe" && ($ngroups > 1) ){
+        print TFILE "$LAPSROOT/$exedir/$exe $igroup $args $LAPS_DATA_ROOT 1> $LAPS_LOG_PATH/$log.$igroup 2>&1\n";
+      }else{
+        print TFILE "$LAPSROOT/$exedir/$exe $args 1>> $LAPS_LOG_PATH/$log 2>&1\n";
+      }
+      my $wait_file = "$LAPS_LOG_PATH/qsub.$exe.done.$yyjjjhhmm";
+      print TFILE "touch $wait_file\n";
+      print TFILE "  \n";
+      print $t." Closing $LAPS_LOG_PATH/$qsubfile with executable $exe\n";
+      close(TFILE);
+
+      chdir($LAPS_LOG_PATH) || die "could not chdir to $LAPS_LOG_PATH";
+      if(defined $opt_w && ($ngroups eq 1) ){
+        if($opt_q){ # SGE queueing syntax (THEIA)
+          $command = "qsub -A $opt_q $LAPS_LOG_PATH/$qsubfile";
+          print "Executing $command\n";
+          system("$command");
+
+#         Wait for $wait_file to appear                              
+          print "Waiting for $wait_file for up to 60 minutes...\n";
+          my $iwait = &laps_tools::wait_for_file("$wait_file",60,3600);
+          print "Waited for $wait_file with $iwait waits remaining\n";
+          if(! -e "$wait_file"){
+            print "ERROR: $wait_file never appeared with $iwait waits remaining\n";
+            exit;
+          }
+
+        }else{ # opt_Q SGE queueing syntax (JET)
+          $command = "@PBSHOME@/bin/qsub_wait $LAPS_LOG_PATH/$qsubfile";
+          print "Executing $command\n";
+          system("$command");
+
+        }
+
+      }else{
+#       $command = "@PBSHOME@/bin/qsub_wait $LAPS_LOG_PATH/$qsubfile&";
+#       $command = "$LAPSROOT/etc/run_qsub.sh $LAPS_LOG_PATH/$qsubfile";
+        if($opt_q){
+          $command = "qsub -A $opt_q $LAPS_LOG_PATH/$qsubfile";
+        }else{ # opt_Q
+          $command = "$LAPSROOT/etc/qsub $LAPS_LOG_PATH/$qsubfile";
+        }
+        print "Executing $command\n";
+        system("$command");
+
+      }
+
+      $igroup++;
+    } # end while $igroup le $ngroups
+
+}else{
+    $igroup = 1;
+    while ($igroup le $ngroups){
+
+      if($ngroups > 1){
+        my $sys = "$LAPSROOT/$exedir/$exe $igroup $args $LAPS_DATA_ROOT 1> $LAPS_LOG_PATH/$log.$igroup 2>&1 &";
+        print "submitting $sys\n";
+        system($sys);
+#       unlink "$lockfile";
+#       &forksub($sys,$lockfile);
+      }else{
+        my $sys = "$LAPSROOT/$exedir/$exe $args ";
+#       system($sys);
+#       unlink "$lockfile";
+        &forksub($sys,$lockfile);
+      }
+
+      $igroup++;
+
+    } # end while $igroup le $ngroups
+
+}
+
+exit;
+
+sub forksub{
+    my($sys,$lockfile) = @_;
+  FORK: {      
+      my $pid;
+      if($pid = fork) {
+	  # parent process
+	  open(LOCK,">$lockfile");
+	  print LOCK "$pid\n";
+	  close(LOCK);
+	
+	  waitpid $pid,0;
+	  unlink "$lockfile";
+
+
+      }elsif (defined $pid) { 
+	  #child here
+	  exec($sys);
+	  unlink "$lockfile";
+	  exit;
+      }elsif ($! =~ /No more process/){
+	  # EAGAIN, recoverable fork error
+	  sleep 5;
+	  redo FORK;
+      }else{
+	  die "Can't fork: $!\n";
+      }
+  }
+}
+
+
+
+
+
+

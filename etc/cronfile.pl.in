@@ -1,0 +1,92 @@
+#!@PERL@
+#
+# installroot is location of binaries (bin), scripts (etc),
+# and installed data (data); otherwise it can be srcroot.
+# laps_data_root is location of static, lapsprd, cdl, and
+# so forth.
+
+use strict;
+umask 002;
+use Getopt::Long;
+
+my($LAPSINSTALLROOT,$LAPS_DATA_ROOT,$REMOTE_DATA_ROOT,$schedtime,$numfiles,$qsubproj,$followup,$LAPS_SRC_ROOT,$webdir,$logdir);
+my $result = GetOptions(
+   "installroot=s" => \$LAPSINSTALLROOT, # (required)
+   "dataroot=s" => \$LAPS_DATA_ROOT,     # (required)
+   "schedtime=s" => \$schedtime,         # e.g. 20,50 (optional)
+   "qsubproj=s" => \$qsubproj,           # qsub project (if qsub is being used)
+   "followup=s" => \$followup,           # domain name for running followup_ncarg.com script (optional)
+   "remoteroot=s" => \$REMOTE_DATA_ROOT, # needed with followup on a remote machine
+   "numfiles=s" => \$numfiles            # number of files to keep with purger (optional, except needed with followup on a remote machine)
+                                         );          
+
+print "Starting cronfile.pl...\n";
+
+my @lines;
+
+print "LAPSINSTALLROOT = $LAPSINSTALLROOT \n";
+
+$LAPS_DATA_ROOT = "$LAPSINSTALLROOT/data" if(! $LAPS_DATA_ROOT);
+print "LAPS_DATA_ROOT = $LAPS_DATA_ROOT\n";
+
+
+# Note that the @laps_data_root@ is only set up now for a single window
+# In the future, this construct could be expanded to allow the
+# cronfile and laps_monitor.pl scripts to handle multiple windows.
+
+chdir $LAPS_DATA_ROOT;
+
+#Make a copy of the cronfile that is unique for this LAPS_DATA_ROOT
+system("cp $LAPSINSTALLROOT/util/cronfile $LAPS_DATA_ROOT/cronfile");
+
+#String edit the cronfile to set the proper LAPS_DATA_ROOT path
+system("$LAPSINSTALLROOT/util/fix_net \@laps_data_root@ $LAPS_DATA_ROOT $LAPS_DATA_ROOT/cronfile");
+
+#Make a copy of the laps_monitor.pl that is unique for this LAPS_DATA_ROOT
+system("cp $LAPSINSTALLROOT/etc/laps_monitor.pl $LAPS_DATA_ROOT/laps_monitor.pl");
+
+#String edit the laps_monitor.pl to set the proper LAPS_DATA_ROOT path
+system("$LAPSINSTALLROOT/util/fix_net \@laps_data_root@ $LAPS_DATA_ROOT $LAPS_DATA_ROOT/laps_monitor.pl");
+
+print "schedtime = $schedtime\n";
+if(defined($schedtime)){ 
+    print "modifying schedtime\n";
+    system("$LAPSINSTALLROOT/util/fix_net \'20 \' $schedtime $LAPS_DATA_ROOT/cronfile");
+}
+
+if(defined($followup)){
+    print "followup = $followup\n";
+    system("$LAPSINSTALLROOT/util/fix_net sched.pl \'sched.pl -f $followup \' $LAPS_DATA_ROOT/cronfile");
+}
+
+print "numfiles = $numfiles\n";
+if(defined($numfiles)){
+    print "adding numfiles purge\n";
+    system("$LAPSINSTALLROOT/util/fix_net sched.pl \'sched.pl -r -m $numfiles \' $LAPS_DATA_ROOT/cronfile");
+}
+
+if(-e "$LAPS_DATA_ROOT/cronfile"){
+    open(IN,"$LAPS_DATA_ROOT/cronfile");
+    @lines= <IN>;
+    close IN;
+
+    foreach (@lines) {
+
+       if(defined($qsubproj)){
+           if( /sched\.pl/ ){
+               s/sched\.pl/sched\.pl -q $qsubproj/;
+           }
+           if( /laps_driver\.pl remap_polar_netcdf\.exe/ ){
+               s/laps_driver\.pl/laps_driver\.pl remap_polar_netcdf\.exe -q $qsubproj/;
+           }
+       }
+
+    }
+
+    open(OUT,">$LAPS_DATA_ROOT/cronfile");
+    foreach (@lines) {print OUT "$_";}
+    close OUT;
+}
+
+
+exit;

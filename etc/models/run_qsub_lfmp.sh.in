@@ -1,0 +1,151 @@
+#!/bin/sh --login
+
+modelroot=$1    # Example: /lfs0/projects/hmtb/dwr_domains/efp_conus
+model=$2        # Example: wrf (arw), arw, nmm, mm5, st4, none
+physics=$3      # Example: tom, none
+lbc=$4          # Example: gfs1, none
+name=$5         # Example: ewp0, wrf-wsm6, or none (should match a '$LAPS_DATA_ROOT/lapsprd/fua' subdirectory name and an element of 'nest7grid.parms/fdda_model_source')
+nest=$6         # Example: 1 or -2
+lapsdataroot=$7 # Example: /lfs0/projects/hmtb/dwr_domains/laps_psd   
+delay=$8        # Example: 2.0
+
+wallclock=02:00
+if test "$9" != ""; then # Example: 02:00 (optional)
+    wallclock=$9
+fi
+
+if test "$name" != "wrf-hrrr" && test "$name" != "advection"; then                           #                  
+    mdlfilewait=200
+else
+    mdlfilewait=5  
+fi
+
+project=dlaps
+
+if test "$name" != "none"; then                               # (e.g. ewp0)
+    run=$name
+elif test "$physics" != "none" && test "$lbc" != "none"; then # (e.g. wrf-fer-gep0)
+    run=$model\-$physics\-$lbc
+elif test "$physics" != "none" && test "$lbc" == "none"; then # (e.g. wrf-fer)
+    run=$model\-$physics
+elif test "$physics" == "none" && test "$lbc" != "none"; then # (e.g. wrf-gep0)
+    run=$model\-$lbc
+elif test "$physics" == "none" && test "$lbc" == "none"; then # (e.g. wrf)
+    run=$model\-$lbc
+fi
+
+echo "mkdir -p $modelroot"
+      mkdir -p $modelroot
+
+log=$lapsdataroot/log/lfmpost_run.log.`date +\%H\%M`
+
+rm -f $lapsdataroot/log/qlfmp.log.`date +\%H\%M`
+
+model_cycle_time=`@PERL@ @prefix@/etc/read_nl.pl -d $lapsdataroot -n nest7grid.parms -v model_cycle_time`
+echo "model_cycle_time = $model_cycle_time"
+
+model_run_time=`@PERL@ @prefix@/etc/sched_sys.pl -c $model_cycle_time -d $delay -f yyyy_mm_dd_hhmm`
+echo "model_run_time = $model_run_time"
+
+numFcsts=`@PERL@ @prefix@/etc/read_nl.pl -d $lapsdataroot -n nest7grid.parms -v n_fcst_steps_p1`
+echo "numFcsts = $numFcsts"
+
+nx=`@PERL@ @prefix@/etc/read_nl.pl -d $lapsdataroot -n nest7grid.parms -v nx_l`
+echo "nx = $nx"
+
+nodetype=hserial
+
+if test "$nx" -gt "1500"; then
+    vmem=16000M
+else
+    vmem=6000M
+fi
+echo "nodetype = $nodetype"
+
+# Use the forecast increment from the namelist, except establish a floor of 15 minutes for the HRRR
+fcstIncrMin_nl=`@PERL@ @prefix@/etc/read_nl.pl -d $lapsdataroot -n nest7grid.parms -v fcst_intvl_min`
+if test "$physics" = hrrr; then
+    if test "$fcstIncrMin_nl" -gt 15; then
+        fcstIncrMin=$fcstIncrMin_nl
+    else
+        fcstIncrMin=15
+    fi
+else
+    fcstIncrMin=$fcstIncrMin_nl
+fi
+echo "fcstIncrMin = $fcstIncrMin"
+
+date -u
+
+# Run purger on lfmpost and other log files
+echo "@PERL@ @prefix@/etc/purger.pl -r -t 72.0 $modelroot/log" 
+      @PERL@ @prefix@/etc/purger.pl -r -t 72.0 $modelroot/log  
+
+# Run purger on model run directories
+echo "@PERL@ @prefix@/etc/purge_w3_fcst2d.pl -d $modelroot -t 72.0 modelroot model_dum" 
+      @PERL@ @prefix@/etc/purge_w3_fcst2d.pl -d $modelroot -t 72.0 modelroot model_dum
+
+date -u
+
+# Build qsub script
+script=$modelroot/qsub_lfmpost.sh
+echo "#!/bin/sh --login"         > $script
+echo "#PBS -l procs=1"          >> $script
+echo "#PBS -l walltime=$wallclock:00" >> $script
+echo "#PBS -l vmem=$vmem"       >> $script
+echo "#PBS -m n"                >> $script
+echo "#PBS -A dlaps"            >> $script
+echo "#PBS -N lfmp_$run"        >> $script
+echo "#PBS -j oe"               >> $script
+echo "#PBS -o $lapsdataroot/log/qlfmp.log.`date +\%H\%M`"           >> $script
+echo " "                        >> $script
+
+if test "$model" = arw; then
+    modelarg=wrf                                                                 
+else
+    modelarg=$model                                                              
+fi
+
+echo "lbc=$lbc"                 >> $script
+echo "physics=$physics"         >> $script
+echo "nest=$nest"               >> $script
+echo " "                        >> $script
+
+echo "export LAPSROOT=@prefix@"                                 >> $script
+#echo "export LAPSROOT=/home/oplapb/builds_lahey/laps"           >> $script
+
+echo "export LAPS_DATA_ROOT=$lapsdataroot"                      >> $script
+
+echo "export NETCDF=/opt/netcdf/3.6.3-pgi"                >> $script
+echo "export PATH=\$PATH:/opt/netcdf/3.6.3-pgi/bin"       >> $script
+echo "export phys=$physics"                                     >> $script
+echo " "                                                        >> $script
+echo "fcstIncrMin=$fcstIncrMin"                                 >> $script
+echo "numFcsts=$numFcsts"                                       >> $script
+echo "maxWaitSec=43200"                                         >> $script
+echo "maxHrsRun=24"                                             >> $script
+echo "name=$name"                                               >> $script
+echo " echo 'Running this lfmpost.pl command...'"               >> $script
+if test "$name" == "advection"; then # (e.g. advection)
+    echo " echo '/usr/bin/perl @prefix@/etc/lfmpost.pl -q -m $modelarg -r $modelroot -d $model_run_time -f $numFcsts -i $fcstIncrMin -w \$maxWaitSec -e \$maxHrsRun -n $name -P $project -g $nest -C 21600 -Z 21600 -W $mdlfilewait' " >> $script
+    echo "       /usr/bin/perl @prefix@/etc/lfmpost.pl -q -m $modelarg -r $modelroot -d $model_run_time -f $numFcsts -i $fcstIncrMin -w \$maxWaitSec -e \$maxHrsRun -n $name -P $project -g $nest -C 21600 -Z 21600 -W $mdlfilewait"   >> $script
+elif test "$name" != "none"; then    # (e.g. ewp0)
+    echo " echo '/usr/bin/perl @prefix@/etc/lfmpost.pl -q -m $modelarg -r $modelroot -d $model_run_time -f $numFcsts -i $fcstIncrMin -w \$maxWaitSec -e \$maxHrsRun -n $name -P $project -g $nest -W $mdlfilewait' " >> $script
+    echo "       /usr/bin/perl @prefix@/etc/lfmpost.pl -q -m $modelarg -r $modelroot -d $model_run_time -f $numFcsts -i $fcstIncrMin -w \$maxWaitSec -e \$maxHrsRun -n $name -P $project -g $nest -W $mdlfilewait"   >> $script
+else
+    echo " echo '/usr/bin/perl @prefix@/etc/lfmpost.pl -q -m $modelarg -r $modelroot -d $model_run_time -f $numFcsts -i $fcstIncrMin -w \$maxWaitSec -e \$maxHrsRun -y $phys -P $project -g $nest -W $mdlfilewait' " >> $script
+    echo "       /usr/bin/perl @prefix@/etc/lfmpost.pl -q -m $modelarg -r $modelroot -d $model_run_time -f $numFcsts -i $fcstIncrMin -w \$maxWaitSec -e \$maxHrsRun -y $phys -P $project -g $nest -W $mdlfilewait"   >> $script
+fi
+echo " "                                                        >> $script
+echo " "                                                        >> $script
+echo " exit 0"                                                  >> $script
+
+echo " "
+echo " Running qsub script contained in $script...."
+cat $script
+echo " "
+echo " using this command..."
+echo "qsub $script > $log 2>&1"
+
+qsub $script > $log 2>&1
+

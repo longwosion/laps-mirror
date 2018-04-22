@@ -1,0 +1,80 @@
+
+<body bgcolor="#CCCCCC">
+
+<h2>Source(s):</h2>
+Click on one or more entries to specify data sources.
+
+<h3>bkgnd:</h3>
+Plot model background fields used as the analysis first guess. These are
+remapped onto the LAPS grid in the LGA/LGB files.
+
+<h3>analysis:</h3>Plot analysis (pre-balanced) fields.
+
+<h3>balanced:</h3>Plot balanced fields.                     
+
+<h3>wrf, mm5, etc:</h3>
+Plot model forecast fields that were initialized with LAPS analyses (FUA/FSF
+files)
+
+<p>
+Note: an asterisk after a source indicates it is the preferred background for
+use in the analyses.
+
+<h3>DIFF/diff:</h3>
+
+To difference two fields, click also on the lower-case 'diff' to add an 
+overlay with the difference field. The last two source/field/level overlays will be
+used for the difference. This should work for most fields, except for wind 
+barbs and wind speed. Clicking on the upper-case 'DIFF' will produce a
+difference image. The overlays for the two fields being differenced will
+not be plotted for this image option. When doing differences it is recommended
+to use only lower case "Field" selections.
+<p>
+On some machines (e.g. PCs with windows) you may need to hold down the 
+CTRL key while clicking for multiple choices with the mouse.
+
+
+<h3>obs:</h3>
+
+
+<p>
+Show observation plots (surface or upper level).
+For observation plots at upper levels, here is the color scheme:
+<ul>
+<li>Wind
+<ul>
+<li><span style="color: rgb(255, 165, 255);">Lavender</span> - Profiler, Tower, Dropsonde
+<li><span style="color: rgb(255, 0, 0);">Red</span> - RAOB
+<li><span style="color: rgb(0, 230, 255);">Light Blue</span> - ACARS (at the level)
+<li><span style="color: rgb(102, 89, 204);">Indigo</span> - ACARS (near the level)
+<li><span style="color: rgb(255, 165, 0);">Orange</span> - WISDOM balloons (at the level)
+<li><span style="color: rgb(153, 76, 25);">Pale Orange</span> - WISDOM balloons (near the level)
+<li><span style="color: rgb(0, 230, 255);">Light Blue</span> (small barbs) - Surface Obs (at the level)
+<li><span style="color: rgb(102, 89, 204);">Dark Blue</span> (small barbs) - Surface Obs (near the level)
+<li><span style="color: rgb(178, 255, 51);">Yellow-Green</span> - Cloud Drift Winds (at the level)
+<li><span style="color: rgb(75, 75, 75);">Grey</span> - Cloud Drift Winds (off the level)
+<li><span style="color: rgb(255, 255, 0);">Orange</span> (small barbs) - Doppler Derived Winds (at the level)
+<li>Radar - Radial velocity is shown as <span style="color: rgb(255, 0, 0);">red</span> (receding) and <span style="color: rgb(25, 230, 25);">green</span> (approaching) grid squares
+</ul>
+</ul><ul>
+
+<li>Temperature / Dewpoint / Specific Humidity
+<ul>
+<li><span style="color: rgb(0, 230, 255);">Aqua</span> - RASS
+<li><span style="color: rgb(255, 255, 0);">Yellow</span> - RAOB
+<li><span style="color: rgb(255, 165, 0);">Orange</span> - Radiometer
+<li><span style="color: rgb(62, 114, 242);">Deep Blue</span> - Dropsonde
+<li><span style="color: rgb(255, 165, 255);">Magenta</span> - Satellite Soundings (e.g. GOES)
+<li><span style="color: rgb(153, 0, 204);">Violet</span> - POES Satellite Soundings
+<li><span style="color: rgb(255, 0, 0);">Red</span> - ACARS
+
+<li><span style="color: rgb(25, 230, 25);">Green</span> - METARs
+</ul>
+</ul>
+
+
+<h3>what-got-in:</h3>
+
+Show a text listing of what data were used for this analysis field
+
+</body>

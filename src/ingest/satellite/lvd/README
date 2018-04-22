@@ -1,0 +1,137 @@
+
+
+   LVD MODULE OUTLINE
+   __________________
+
+   lvd_sat_ingest                            lvd_sat_ingest.f
+       config_satellite_lvd                  lib/read_namelist.f
+           conf_isjtkc                              "
+              satellite_common_lvd           include/satellite_common_lvd.inc
+              satdata_lvd_table              include/satdata_lvd_table.for
+       compute_nav_ll                        compute_nav_llij.f
+           genlvdlut_lvd                     lib/satellite/genlvdlut_lvd.f 
+               gen_lut_lambert               lib/satellite/gen_lut_lambert.f
+                   get_wfo_nav_parms         lib/satellite/update_gvarimg_parms.f
+                       get_attribute_wfo     lib/satellite/get_attr_satellite.f
+                   rdcdfhead                 lib/satellite/rdcdfhead.f
+                   get_sat_boundary          lib/satellite/getsat_boundary.f 
+               gen_gvarimage_lut             lib/satellite/gen_lut_gvar.f
+                   update_gvarimg_parms      lib/satellite/update_gvarimg_parms.f
+                       rd_gvarimg_cdf_header lib/satellite/rdgvarimg_cdf_header.f
+                       sat_sublatlon
+                           time50            lib/goesinav/gimloc.f
+                   time50                         "
+                   setcon                         "
+                   lmodel                         "
+                   get_sat_boundary          lib/satellite/getsat_boundary.f
+               get_lut_mercator              lib/satellite/gen_lut_mercator.f
+               get_lut_ps                    lib/satellite/genlutps.f
+       lvd_driver_sub                        lvd_driver_sub.f
+           readlut                           readlut.f
+               get_wfo_nav_parms             lib/satellite/update_gvarimg_parms.f
+                   get_attribute_wfo         lib/satellite/get_attr_satellite.f
+           lvd_file_specifier                lib/satellite/lvd_file_specifier.f
+           getcdf_satdat                     getcdf_satdat.f
+               lvd_file_specifier            lvd_file_specifier.f
+               wait_for_satdat               wait_for_satdat.f
+               readsatdat                    readsatdat.f
+                   lvd_file_specifier        lvd_file_specifier.f
+                   readcdf                   readcdf.f         
+                       rdblock_line_elem     rdcdfblock.f    
+                           getsat_attributes getsat_attributes.f
+                       read_netcdf_sat_head  lib/satellite/readnet.f        
+           read_gms_hko                      read_gms_hko.f
+               get_satdat_attributes         getsat_attributes.f
+           read_gms_taiwan                   read_gms_hko.f
+               get_satdat_attributes         getsat_attributes.f
+           genbtemplut                       genbtemplut.f
+               get_satdat_attributes         getsat_attributes.f
+           satdatfill                        satdatfill.f
+               set_missing_sat               set_missing_sat.f
+               satdatfill1                   satfill1.f
+                   get_cdf_dims              readnet.f
+                   readcdf                   readcdf.f
+           lvd_file_specifier                lvd_file_specifier.f
+           read_gvarimg_cnt2btemp_lut 
+           set_missing_flag                  setmissingflag.f
+               set_missing_sat               set_missing_sat.f
+           btemp_convert_asc                 btempconv_asc.f
+           latlon_to_grij                    latlon_to_grij.f
+           process_ir_satellite              satir_process.f
+               satdat2laps_ir                satir2laps.f 
+               check                         check_data.f       
+           process_vis_satellite             satvis_process.f       
+               satdat2laps_vis               satvis2laps.f
+               normalize_brightness          lib/normalize.f
+                   sat_angular_alt                 "
+               vis_to_albedo                 lib/vis2albedo.f
+           loadlapsdata
+           write_laps_data
+           check_for_new_ctp
+           write_laps_data
+
+The lvd code is written to process the block of satellite data
+that covers a laps domain. LVD uses a namelist file: 
+data/static/satellite_lvd.nl The file has been designed such that a user 
+typically only has to modify the PATH_TO_RAW_SAT, ISATS, ITYPES, and ICHANNELS
+parameters. These, and other specific modifications are discussed below.
+
+If the raw satellite data does not cover the entire LAPS domain,
+lvd uses the internal missing_data flag to identify these grid points.
+The cloud analysis software uses a namelist parameter (see 
+static/cloud.nl ... pct_req_lvd_s8a) to accept or reject satellite
+data that partially covers a domain. All other analyses use any
+satellite data available in the lvd intermediate files.
+
+lvd computes the navigation/remapping (lat-lon to i-j) look-up-
+tables dynamically.  However, a separate executable (genlvdlut.exe)
+is also built (not used) for diagnostic purposes when a user needs
+to check the remapping look-up-table (LUT) generation.  The LUT's
+are written to static/lvd/"satid"-llij-"channel"-"type".lut
+
+lvd_sat_ingest checks if the LUT's exist or whether the existing
+LUT is accurate for the data type being processed. The LUT generation
+code is in src/lib/satellite. The localization script removes any
+existing LUT's in static/lvd which forces lvd_sat_ingest.exe to
+produce new LUT's upon first execution.  The new mapping LUT's
+are used thereafter until the satellite navigation or laps domain
+parameters change. Note that for GVAR (gvr) type data, new LUT's are
+generated automatically once per day (at ~ 0000).
+
+The LAPS satellite ingest creates an intermediate file with
+extension "lvd" (lapsprd/lvd/"satid"/.   The
+namelist works in conjunction with a data include file
+src/include/sat_data_static.inc which contains static information
+relevant to the executable.  LAPS library routine config_satellite_lvd
+(in file read_namelist.f) loads the common block defined in src/include
+/satellite_common_lvd.inc.  Recall, the information in the common block is
+referenced by the namelist variables ISATS, ITYPES, and ICHANNELS.
+This is why the user only needs to modify those variables
+and most everything else is taken care of automatically.
+
+The lvd output is in a specific satellite_id subdirectory (currently
+there are four satellites known, one is obsolete: goes08, goes09 [obsolete],
+goes10 and GMS).  lvd  processes more that one satellite simultaneously
+depending on CSATID settings. The satellite data format is activated with namelist
+parameter CSATTYPES. There is a maximum of 4 satellite data format types (GVAR
+[gvr], WFO [wfo], FSL-public [cdf], and AFWA [gwc]). lvd can process all
+four data formats for any satellite simultaneously with the appropriate
+namelist settings of CSATID and CSATTYPES. 
+
+A similar functionality exists for the channel processing which uses
+namelist parameter CCHANNELTYPES. The GOES imagers have five channels which
+defines the maximum number of channels possible.  lvd can process any
+one of these five, including all five. Other satellites may have fewer
+channels but the channel switch conforms to the GOES channels as follows:
+1. vis, 2. 3.9u, 3. 6.7u (water vapor), 4. 11.2 (window ir), 5. 12.0u.
+
+
+                      RAW Satellite Data Types
+                     -------------------------
+
+lvd accepts goes08, goes09 and goes10 satellite data in several formats: 
+
+    1. netcdf public: remapped fsl-conus [lambert] (type=cdf) and 
+                      raw gvar (type=gvr).
+    2. wfo SBN: also netcdf and lambert projection (type=wfo)
+    3. AirForce Global Weather Center (type=gwc).

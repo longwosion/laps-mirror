@@ -1,0 +1,388 @@
+#!@CSH@
+
+# This script verifies LAPS forecast FUA/FSF files against various types of observations
+# The FUA/FSF files are assumed to be in 'lapsprd/f??/*' subdirectories. These subdirectories
+# should be consistent with the 'fdda_model_source' parameter in 'nest7grid.parms'.
+
+# arg1 is the LAPS_DATA_ROOT (e.g. /data/fab/projects/dwr)
+# arg2 is a dummy value for real-time cases - set to "archive" for archive cases
+# arg3 is the delay in hours for the modeltime relative to the crontime (e.g. 12.0) 
+#      set to dd-Mon-yyyy-hhmm for an archive case (e.g. 02-May-2014-2330)
+# arg4 domain name (from the "on-the-fly" page)                                                  
+# arg5 (optional) is number of forecast times that have a valid analysis to compare with (excluding analysis, e.g. 2)
+#      note this can represent a shorter time than what is in 'nest7grid.parms/model_fcst_len'
+
+setenv LAPSINSTALLROOT @prefix@
+setenv LAPS_DATA_ROOT $1
+setenv DOMAIN_NAME $4
+
+if ($5 == "") then
+    setenv N_VERIF_TIMES `@PERL@ @prefix@/etc/read_nl.pl -d $LAPS_DATA_ROOT -n nest7grid.parms -v n_verif_steps`
+    setenv NTIMES $N_VERIF_TIMES
+else
+    setenv N_VERIF_TIMES $5
+    setenv NTIMES $5
+endif
+
+setenv REPODIR $6
+
+@ NTIMES = $NTIMES + 1
+
+#setenv REMOTE_DATA_ROOT $6
+
+date -u
+
+uname -a
+whoami
+
+umask 002 
+
+echo $N_VERIF_TIMES > $LAPS_DATA_ROOT/lapsprd/verif/n_fcst_times.dat
+
+# sync stage IV files
+if (-e $LAPSINSTALLROOT/etc/ingest_stageIV_files.pl) then
+    if ($REPODIR == "") then
+        if (-d /w3/jet) then
+            setenv REPODIR /w3/jet/fab/st4repo
+        else
+            setenv REPODIR /scratch1/portfolios/BMC/dtc/holub/st4repo
+        endif                                            
+    endif
+
+    if (-d $REPODIR) then
+        echo "perl $LAPSINSTALLROOT/etc/ingest_stageIV_files.pl $4 $1 $REPODIR >& $LAPS_DATA_ROOT/log/ingest_stageIV_files.log"
+              perl $LAPSINSTALLROOT/etc/ingest_stageIV_files.pl $4 $1 $REPODIR >& $LAPS_DATA_ROOT/log/ingest_stageIV_files.log 
+    else
+        echo "NOTE: $REPODIR not found..."
+    endif
+
+else
+    echo "NOTE: $LAPSINSTALLROOT/etc/ingest_stageIV_files.pl not found..."
+endif
+
+if ($2 == archive) then
+#   perl $LAPSINSTALLROOT/etc/sched_sys.pl -A $3                      > $LAPS_DATA_ROOT/time/modeltime.dat 
+#   perl $LAPSINSTALLROOT/etc/sched_sys.pl -A $3       -f ascii_time >> $LAPS_DATA_ROOT/time/modeltime.dat 
+
+    perl $LAPSINSTALLROOT/etc/sched_sys.pl -A $3                      > $LAPS_DATA_ROOT/time/modelvtime.dat 
+    perl $LAPSINSTALLROOT/etc/sched_sys.pl -A $3       -f ascii_time >> $LAPS_DATA_ROOT/time/modelvtime.dat 
+
+else # real-time
+#   perl $LAPSINSTALLROOT/etc/sched_sys.pl -c $2 -d $3                > $LAPS_DATA_ROOT/time/modeltime.dat 
+#   perl $LAPSINSTALLROOT/etc/sched_sys.pl -c $2 -d $3 -f ascii_time >> $LAPS_DATA_ROOT/time/modeltime.dat 
+
+    setenv MODEL_CYCLE_TIME `@PERL@ @prefix@/etc/read_nl.pl -d $LAPS_DATA_ROOT -n nest7grid.parms -v model_cycle_time`
+
+    perl $LAPSINSTALLROOT/etc/sched_sys.pl -c $MODEL_CYCLE_TIME -d $3                > $LAPS_DATA_ROOT/time/modelvtime.dat 
+    perl $LAPSINSTALLROOT/etc/sched_sys.pl -c $MODEL_CYCLE_TIME -d $3 -f ascii_time >> $LAPS_DATA_ROOT/time/modelvtime.dat 
+
+    echo "setenv MODELVTIME `head -1 $LAPS_DATA_ROOT/time/modelvtime.dat`"
+          setenv MODELVTIME `head -1 $LAPS_DATA_ROOT/time/modelvtime.dat`
+
+    date -u
+
+    if (-e /w3/lapb && -e $LAPS_DATA_ROOT/time/copyremotetime.dat) then # running at GSD on a mirrored data directory
+        echo "Make data dirs since this is running on a mirrored set of data"
+        echo "perl $LAPSINSTALLROOT/etc/makedatadirs.pl --installroot=$LAPSINSTALLROOT --dataroot=$LAPS_DATA_ROOT --srcroot=$LAPSINSTALLROOT --system_type=laps"
+              perl $LAPSINSTALLROOT/etc/makedatadirs.pl --installroot=$LAPSINSTALLROOT --dataroot=$LAPS_DATA_ROOT --srcroot=$LAPSINSTALLROOT --system_type=laps
+    endif
+
+endif
+
+# Radar verification........................................................................................
+
+echo "setenv LAPS_A9TIME `head -1 $LAPS_DATA_ROOT/time/modelvtime.dat`"
+      setenv LAPS_A9TIME `head -1 $LAPS_DATA_ROOT/time/modelvtime.dat`
+
+date -u
+
+echo "$LAPSINSTALLROOT/bin/verif_cont.exe > $LAPS_DATA_ROOT/log/verif_cont.log.`date -u +\%H`"
+      $LAPSINSTALLROOT/bin/verif_cont.exe > $LAPS_DATA_ROOT/log/verif_cont.log.`date -u +\%H`
+
+date -u
+
+foreach SUBDIR (REF LMR)
+    foreach THRESH (20 30 40 20_comp 30_comp 40_comp 20_comp2 30_comp2 40_comp2)
+
+        echo "$LAPSINSTALLROOT/etc/verif/radar_forecast.csh $LAPS_DATA_ROOT $NTIMES Bias 10.0 $THRESH $DOMAIN_NAME $SUBDIR > $LAPS_DATA_ROOT/log/radar_fcst_bias_$SUBDIR\_$THRESH.log"
+              $LAPSINSTALLROOT/etc/verif/radar_forecast.csh $LAPS_DATA_ROOT $NTIMES Bias 10.0 $THRESH $DOMAIN_NAME $SUBDIR > $LAPS_DATA_ROOT/log/radar_fcst_bias_$SUBDIR\_$THRESH.log
+        echo "$LAPSINSTALLROOT/etc/verif/radar_forecast.csh $LAPS_DATA_ROOT $NTIMES ETS   1.0 $THRESH $DOMAIN_NAME $SUBDIR > $LAPS_DATA_ROOT/log/radar_fcst_ets_$SUBDIR\_$THRESH.log"
+              $LAPSINSTALLROOT/etc/verif/radar_forecast.csh $LAPS_DATA_ROOT $NTIMES ETS   1.0 $THRESH $DOMAIN_NAME $SUBDIR > $LAPS_DATA_ROOT/log/radar_fcst_ets_$SUBDIR\_$THRESH.log
+    end
+end
+
+foreach SUBDIR (PCP_01 PCP_03 PCP_06 PCP_24)
+    foreach THRESH (0001 0005 0010 0050 0100 0200 0500 0001_comp 0005_comp 0010_comp 0050_comp 0100_comp 0200_comp 0500_comp 0001_comp2 0005_comp2 0010_comp2 0050_comp2 0100_comp2 0200_comp2 0500_comp2)
+
+        echo "$LAPSINSTALLROOT/etc/verif/radar_forecast.csh $LAPS_DATA_ROOT $NTIMES Bias 10.0 $THRESH $DOMAIN_NAME $SUBDIR > $LAPS_DATA_ROOT/log/radar_fcst_bias_$SUBDIR\_$THRESH.log"
+              $LAPSINSTALLROOT/etc/verif/radar_forecast.csh $LAPS_DATA_ROOT $NTIMES Bias 10.0 $THRESH $DOMAIN_NAME $SUBDIR > $LAPS_DATA_ROOT/log/radar_fcst_bias_$SUBDIR\_$THRESH.log
+        echo "$LAPSINSTALLROOT/etc/verif/radar_forecast.csh $LAPS_DATA_ROOT $NTIMES ETS   0.5 $THRESH $DOMAIN_NAME $SUBDIR > $LAPS_DATA_ROOT/log/radar_fcst_ets_$SUBDIR\_$THRESH.log"
+              $LAPSINSTALLROOT/etc/verif/radar_forecast.csh $LAPS_DATA_ROOT $NTIMES ETS   0.5 $THRESH $DOMAIN_NAME $SUBDIR > $LAPS_DATA_ROOT/log/radar_fcst_ets_$SUBDIR\_$THRESH.log
+    end
+end
+
+foreach SUBDIR (REF LMR PCP_01 PCP_03 PCP_06 PCP_24) # Radar + Precip SUBDIRs
+
+#   Montage the image scores
+    echo ""
+    echo "Montage the latest image scores for $SUBDIR"
+    setenv IMGDIR $LAPS_DATA_ROOT/lapsprd/verif/$SUBDIR/plot
+    if ($SUBDIR == REF || $SUBDIR == LMR) then # Radar
+        setenv IM1 $IMGDIR/radar_fcst_bias_20_$LAPS_A9TIME.png
+        setenv IM2 $IMGDIR/radar_fcst_ets_20_$LAPS_A9TIME.png
+        setenv IM3 $IMGDIR/radar_fcst_bias_30_$LAPS_A9TIME.png
+        setenv IM4 $IMGDIR/radar_fcst_ets_30_$LAPS_A9TIME.png
+        setenv IM5 $IMGDIR/radar_fcst_bias_40_$LAPS_A9TIME.png
+        setenv IM6 $IMGDIR/radar_fcst_ets_40_$LAPS_A9TIME.png
+        setenv IMAGES "$IM1 $IM2 $IM3 $IM4 $IM5 $IM6"
+    else                                       # Precip
+        setenv IM1 $IMGDIR/radar_fcst_bias_0001_$LAPS_A9TIME.png
+        setenv IM2 $IMGDIR/radar_fcst_ets_0001_$LAPS_A9TIME.png
+        setenv IM3 $IMGDIR/radar_fcst_bias_0010_$LAPS_A9TIME.png
+        setenv IM4 $IMGDIR/radar_fcst_ets_0010_$LAPS_A9TIME.png
+        setenv IM5 $IMGDIR/radar_fcst_bias_0050_$LAPS_A9TIME.png
+        setenv IM6 $IMGDIR/radar_fcst_ets_0050_$LAPS_A9TIME.png
+        setenv IMAGES "$IM1 $IM2 $IM3 $IM4 $IM5 $IM6"
+    endif
+
+    echo "check if montage is available"
+    which montage
+
+    setenv IMOUT $IMGDIR/radar_fcst_all_$LAPS_A9TIME.png
+    echo "montage $IMAGES -mode Concatenate -tile 2x3 -border 1x1 -bordercolor grey50 $IMOUT"
+          montage $IMAGES -mode Concatenate -tile 2x3 -border 1x1 -bordercolor grey50 $IMOUT
+
+    setenv LAPS_HHMM `echo $LAPS_A9TIME | cut -c6-9`
+    setenv HHMM_LINK radar_fcst_all_$LAPS_HHMM.png
+
+    if (-e $IMOUT) then
+        echo "cd $IMGDIR; rm -f $HHMM_LINK; ln -s radar_fcst_all_$LAPS_A9TIME.png $HHMM_LINK"
+              cd $IMGDIR; rm -f $HHMM_LINK; ln -s radar_fcst_all_$LAPS_A9TIME.png $HHMM_LINK 
+    else
+        echo "WARNING: $IMOUT was not created, soft link to $HHMM_LINK skipped"
+    endif
+
+    echo ""
+
+    foreach COMP (comp comp2)
+
+        echo ""
+        echo "Montage the $COMP image scores for $SUBDIR"
+        setenv IMGDIR $LAPS_DATA_ROOT/lapsprd/verif/$SUBDIR/plot
+        setenv IM1 $IMGDIR/radar_fcst_bias_20_$COMP\_$LAPS_A9TIME.png
+        setenv IM2 $IMGDIR/radar_fcst_ets_20_$COMP\_$LAPS_A9TIME.png
+        setenv IM3 $IMGDIR/radar_fcst_bias_30_$COMP\_$LAPS_A9TIME.png
+        setenv IM4 $IMGDIR/radar_fcst_ets_30_$COMP\_$LAPS_A9TIME.png
+        setenv IM5 $IMGDIR/radar_fcst_bias_40_$COMP\_$LAPS_A9TIME.png
+        setenv IM6 $IMGDIR/radar_fcst_ets_40_$COMP\_$LAPS_A9TIME.png
+        setenv IMOUT $IMGDIR/radar_fcst_all_$COMP\_$LAPS_A9TIME.png
+        echo "montage $IM1 $IM2 $IM3 $IM4 $IM5 $IM6 -mode Concatenate -tile 2x3 -border 1x1 -bordercolor grey50 $IMOUT"
+              montage $IM1 $IM2 $IM3 $IM4 $IM5 $IM6 -mode Concatenate -tile 2x3 -border 1x1 -bordercolor grey50 $IMOUT
+
+        setenv COMP_LINK radar_fcst_all_$COMP.png
+        if (-e $IMOUT) then
+            echo "cd $IMGDIR; rm -f $COMP_LINK; ln -s radar_fcst_all_$COMP\_$LAPS_A9TIME.png $COMP_LINK"
+                  cd $IMGDIR; rm -f $COMP_LINK; ln -s radar_fcst_all_$COMP\_$LAPS_A9TIME.png $COMP_LINK 
+
+            echo ""
+        else
+            echo "WARNING: $IMOUT was not created, soft link to $COMP_LINK skipped"
+        endif
+
+    end
+
+#   Animate the image score montages
+    echo ""
+    echo "Montage the latest image scores for $SUBDIR"
+    setenv IMGDIR $LAPS_DATA_ROOT/lapsprd/verif/$SUBDIR/plot
+    setenv IMOUT $IMGDIR/radar_fcst_all_anim.gif
+
+    ls -lrt $IMGDIR/radar_fcst_all_[0-9]???.png
+
+    setenv LASTIMG `ls -rt $IMGDIR/radar_fcst_all_[0-9]???.png | tail -1`
+
+    echo "convert -delay 150 -loop 0 `ls -rt $IMGDIR/radar_fcst_all_[0-9]???.png` $LASTIMG $IMOUT"
+          convert -delay 150 -loop 0 `ls -rt $IMGDIR/radar_fcst_all_[0-9]???.png` $LASTIMG $IMOUT
+
+    echo ""
+
+end
+
+date -u
+echo ""
+
+# Point verification (Solar, Sfc, and 3D Wind)..................................................................
+if ($2 != archive) then # realtime
+    echo "Rerunning ingest to get latest obs..."
+
+    echo "$LAPSINSTALLROOT/etc/verif/ingest_rerun_verif.csh $LAPS_DATA_ROOT $MODELVTIME $N_VERIF_TIMES"
+          $LAPSINSTALLROOT/etc/verif/ingest_rerun_verif.csh $LAPS_DATA_ROOT $MODELVTIME $N_VERIF_TIMES
+
+    echo ""
+    date -u
+    echo ""
+
+endif
+
+hostname >  $LAPS_DATA_ROOT/log/verif_fcst.log
+whoami   >> $LAPS_DATA_ROOT/log/verif_fcst.log
+
+echo "$LAPSINSTALLROOT/bin/verif_fcst.exe $LAPS_DATA_ROOT >> $LAPS_DATA_ROOT/log/verif_fcst.log"
+      $LAPSINSTALLROOT/bin/verif_fcst.exe $LAPS_DATA_ROOT >> $LAPS_DATA_ROOT/log/verif_fcst.log
+
+date -u
+
+echo "$LAPSINSTALLROOT/etc/verif/cloud_forecast.csh $LAPS_DATA_ROOT $N_VERIF_TIMES  $DOMAIN_NAME       > $LAPS_DATA_ROOT/log/cloud_fcst.log"
+      $LAPSINSTALLROOT/etc/verif/cloud_forecast.csh $LAPS_DATA_ROOT $N_VERIF_TIMES  $DOMAIN_NAME       > $LAPS_DATA_ROOT/log/cloud_fcst.log
+
+echo "$LAPSINSTALLROOT/etc/verif/cloud_forecast.csh $LAPS_DATA_ROOT $N_VERIF_TIMES  $DOMAIN_NAME comp  > $LAPS_DATA_ROOT/log/cloud_fcst_comp.log"
+      $LAPSINSTALLROOT/etc/verif/cloud_forecast.csh $LAPS_DATA_ROOT $N_VERIF_TIMES  $DOMAIN_NAME comp  > $LAPS_DATA_ROOT/log/cloud_fcst_comp.log
+
+echo "$LAPSINSTALLROOT/etc/verif/cloud_forecast.csh $LAPS_DATA_ROOT $N_VERIF_TIMES  $DOMAIN_NAME comp2 > $LAPS_DATA_ROOT/log/cloud_fcst_comp2.log"
+      $LAPSINSTALLROOT/etc/verif/cloud_forecast.csh $LAPS_DATA_ROOT $N_VERIF_TIMES  $DOMAIN_NAME comp2 > $LAPS_DATA_ROOT/log/cloud_fcst_comp2.log
+
+# For the following plots we want to add in the analysis time as well
+echo "$LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt TSF 0.:100. 0.:50. '"Surface Temperature" "Deg F"' $DOMAIN_NAME >& $LAPS_DATA_ROOT/log/tsf_fcst.log"
+      $LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt TSF 0.:100. 0.:50.  "Surface Temperature" "Deg F"  $DOMAIN_NAME >& $LAPS_DATA_ROOT/log/tsf_fcst.log
+
+echo "$LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt TSF 0.:100. 0.:50. '"Surface Temperature" "Deg F"' $DOMAIN_NAME comp >& $LAPS_DATA_ROOT/log/tsf_fcst_comp.log"
+      $LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt TSF 0.:100. 0.:50.  "Surface Temperature" "Deg F"  $DOMAIN_NAME comp >& $LAPS_DATA_ROOT/log/tsf_fcst_comp.log
+
+echo "$LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt TSF 0.:100. 0.:50. '"Surface Temperature" "Deg F"' $DOMAIN_NAME comp2 >& $LAPS_DATA_ROOT/log/tsf_fcst_comp2.log"
+      $LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt TSF 0.:100. 0.:50.  "Surface Temperature" "Deg F"  $DOMAIN_NAME comp2 >& $LAPS_DATA_ROOT/log/tsf_fcst_comp2.log
+
+echo "$LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt DSF 0.:80. 0.:40. '"Surface Dewpoint" "Deg F"'  $DOMAIN_NAME >& $LAPS_DATA_ROOT/log/dsf_fcst.log"
+      $LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt DSF 0.:80. 0.:40.  "Surface Dewpoint" "Deg F"   $DOMAIN_NAME >& $LAPS_DATA_ROOT/log/dsf_fcst.log
+
+echo "$LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt DSF 0.:80. 0.:40. '"Surface Dewpoint" "Deg F"'  $DOMAIN_NAME comp >& $LAPS_DATA_ROOT/log/dsf_fcst_comp.log"
+      $LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt DSF 0.:80. 0.:40.  "Surface Dewpoint" "Deg F"   $DOMAIN_NAME comp >& $LAPS_DATA_ROOT/log/dsf_fcst_comp.log
+
+echo "$LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt DSF 0.:80. 0.:40. '"Surface Dewpoint" "Deg F"'  $DOMAIN_NAME comp2 >& $LAPS_DATA_ROOT/log/dsf_fcst_comp2.log"
+      $LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt DSF 0.:80. 0.:40.  "Surface Dewpoint" "Deg F"   $DOMAIN_NAME comp2 >& $LAPS_DATA_ROOT/log/dsf_fcst_comp2.log
+
+echo "$LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt USF -20.:20. same '"Sfc Wind U Component"'  "m/s"  $DOMAIN_NAME  >& $LAPS_DATA_ROOT/log/usf_fcst.log"
+      $LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt USF -20.:20. same  "Sfc Wind U Component"   "m/s"  $DOMAIN_NAME  >& $LAPS_DATA_ROOT/log/usf_fcst.log
+
+echo "$LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt VSF -20.:20. same '"Sfc Wind V Component"'    "m/s"  $DOMAIN_NAME  >& $LAPS_DATA_ROOT/log/vsf_fcst.log"
+      $LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt VSF -20.:20. same  "Sfc Wind V Component"     "m/s"  $DOMAIN_NAME  >& $LAPS_DATA_ROOT/log/vsf_fcst.log
+
+echo "$LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt SSF   0.:10. same '"Sfc Wind Speed"'    "m/s"  $DOMAIN_NAME  >& $LAPS_DATA_ROOT/log/ssf_fcst.log"
+      $LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt SSF   0.:10. same  "Sfc Wind Speed"     "m/s"  $DOMAIN_NAME  >& $LAPS_DATA_ROOT/log/ssf_fcst.log
+
+echo "$LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt SSF   0.:10. same '"Sfc Wind Speed"'    "m/s"  $DOMAIN_NAME comp >& $LAPS_DATA_ROOT/log/ssf_fcst_comp.log"
+      $LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt SSF   0.:10. same  "Sfc Wind Speed"     "m/s"  $DOMAIN_NAME comp >& $LAPS_DATA_ROOT/log/ssf_fcst_comp.log
+
+echo "$LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt SSF   0.:10. same '"Sfc Wind Speed"'    "m/s"  $DOMAIN_NAME comp2 >& $LAPS_DATA_ROOT/log/ssf_fcst_comp2.log"
+      $LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt SSF   0.:10. same  "Sfc Wind Speed"     "m/s"  $DOMAIN_NAME comp2 >& $LAPS_DATA_ROOT/log/ssf_fcst_comp2.log
+
+echo "$LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt WSF   0.:10. same '"Sfc Wind"'    "m/s"  $DOMAIN_NAME  >& $LAPS_DATA_ROOT/log/wsf_fcst.log"
+      $LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt WSF   0.:10. same  "Sfc Wind"     "m/s"  $DOMAIN_NAME  >& $LAPS_DATA_ROOT/log/wsf_fcst.log
+
+echo "$LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt WSF   0.:10. same '"Sfc Wind"'    "m/s"  $DOMAIN_NAME comp >& $LAPS_DATA_ROOT/log/wsf_fcst_comp.log"
+      $LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt WSF   0.:10. same  "Sfc Wind"     "m/s"  $DOMAIN_NAME comp >& $LAPS_DATA_ROOT/log/wsf_fcst_comp.log
+
+echo "$LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt WSF   0.:10. same '"Sfc Wind"'    "m/s"  $DOMAIN_NAME comp2 >& $LAPS_DATA_ROOT/log/wsf_fcst_comp2.log"
+      $LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt WSF   0.:10. same  "Sfc Wind"     "m/s"  $DOMAIN_NAME comp2 >& $LAPS_DATA_ROOT/log/wsf_fcst_comp2.log
+
+echo "$LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt R01   0.001:2.0 same '"1 Hour Precip"'    "inches"  $DOMAIN_NAME  >& $LAPS_DATA_ROOT/log/r01_fcst.log"
+      $LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt R01   0.001:2.0 same  "1 Hour Precip"     "inches"  $DOMAIN_NAME  >& $LAPS_DATA_ROOT/log/r01_fcst.log
+
+echo "$LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt R01   0.001:2.0 same '"1 Hour Precip"'    "inches"  $DOMAIN_NAME comp  >& $LAPS_DATA_ROOT/log/r01_fcst_comp.log"
+      $LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt R01   0.001:2.0 same  "1 Hour Precip"     "inches"  $DOMAIN_NAME comp  >& $LAPS_DATA_ROOT/log/r01_fcst_comp.log
+
+echo "$LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt R01   0.001:2.0 same '"1 Hour Precip"'    "inches"  $DOMAIN_NAME comp2  >& $LAPS_DATA_ROOT/log/r01_fcst_comp2.log"
+      $LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt R01   0.001:2.0 same  "1 Hour Precip"     "inches"  $DOMAIN_NAME comp2  >& $LAPS_DATA_ROOT/log/r01_fcst_comp2.log
+
+echo "$LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt R03   0.001:2.0 same '"3 Hour Precip"'    "inches"  $DOMAIN_NAME  >& $LAPS_DATA_ROOT/log/r03_fcst.log"
+      $LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt R03   0.001:2.0 same  "3 Hour Precip"     "inches"  $DOMAIN_NAME  >& $LAPS_DATA_ROOT/log/r03_fcst.log
+
+echo "$LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt R03   0.001:2.0 same '"3 Hour Precip"'    "inches"  $DOMAIN_NAME comp  >& $LAPS_DATA_ROOT/log/r03_fcst_comp.log"
+      $LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt R03   0.001:2.0 same  "3 Hour Precip"     "inches"  $DOMAIN_NAME comp  >& $LAPS_DATA_ROOT/log/r03_fcst_comp.log
+
+echo "$LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt R03   0.001:2.0 same '"3 Hour Precip"'    "inches"  $DOMAIN_NAME comp2  >& $LAPS_DATA_ROOT/log/r03_fcst_comp2.log"
+      $LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt R03   0.001:2.0 same  "3 Hour Precip"     "inches"  $DOMAIN_NAME comp2  >& $LAPS_DATA_ROOT/log/r03_fcst_comp2.log
+
+echo "$LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt R06   0.002:2.0 same '"6 Hour Precip"'    "inches"  $DOMAIN_NAME  >& $LAPS_DATA_ROOT/log/r06_fcst.log"
+      $LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt R06   0.002:2.0 same  "6 Hour Precip"     "inches"  $DOMAIN_NAME  >& $LAPS_DATA_ROOT/log/r06_fcst.log
+
+echo "$LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt R06   0.002:2.0 same '"6 Hour Precip"'    "inches"  $DOMAIN_NAME comp  >& $LAPS_DATA_ROOT/log/r06_fcst_comp.log"
+      $LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt R06   0.002:2.0 same  "6 Hour Precip"     "inches"  $DOMAIN_NAME comp  >& $LAPS_DATA_ROOT/log/r06_fcst_comp.log
+
+echo "$LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt R06   0.002:2.0 same '"6 Hour Precip"'    "inches"  $DOMAIN_NAME comp2  >& $LAPS_DATA_ROOT/log/r06_fcst_comp2.log"
+      $LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt R06   0.002:2.0 same  "6 Hour Precip"     "inches"  $DOMAIN_NAME comp2  >& $LAPS_DATA_ROOT/log/r06_fcst_comp2.log
+
+echo "$LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt R24   0.002:2.0 same '"24 Hour Precip"'    "inches"  $DOMAIN_NAME  >& $LAPS_DATA_ROOT/log/r24_fcst.log"
+      $LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt R24   0.002:2.0 same  "24 Hour Precip"     "inches"  $DOMAIN_NAME  >& $LAPS_DATA_ROOT/log/r24_fcst.log
+
+echo "$LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt R24   0.002:2.0 same '"24 Hour Precip"'    "inches"  $DOMAIN_NAME comp  >& $LAPS_DATA_ROOT/log/r24_fcst_comp.log"
+      $LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt R24   0.002:2.0 same  "24 Hour Precip"     "inches"  $DOMAIN_NAME comp  >& $LAPS_DATA_ROOT/log/r24_fcst_comp.log
+
+echo "$LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt R24   0.002:2.0 same '"24 Hour Precip"'    "inches"  $DOMAIN_NAME comp2  >& $LAPS_DATA_ROOT/log/r24_fcst_comp2.log"
+      $LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt R24   0.002:2.0 same  "24 Hour Precip"     "inches"  $DOMAIN_NAME comp2  >& $LAPS_DATA_ROOT/log/r24_fcst_comp2.log
+
+echo "$LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt RTO   0.001:2.0 same '"Run Total Precip"'    "inches"  $DOMAIN_NAME  >& $LAPS_DATA_ROOT/log/rto_fcst.log"
+      $LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt RTO   0.001:2.0 same  "Run Total Precip"     "inches"  $DOMAIN_NAME  >& $LAPS_DATA_ROOT/log/rto_fcst.log
+
+echo "$LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt RTO   0.001:2.0 same '"Run Total Precip"'    "inches"  $DOMAIN_NAME comp >& $LAPS_DATA_ROOT/log/rto_fcst_comp.log"
+      $LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt RTO   0.001:2.0 same  "Run Total Precip"     "inches"  $DOMAIN_NAME comp >& $LAPS_DATA_ROOT/log/rto_fcst_comp.log
+
+echo "$LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt RTO   0.001:2.0 same '"Run Total Precip"'    "inches"  $DOMAIN_NAME comp2 >& $LAPS_DATA_ROOT/log/rto_fcst_comp2.log"
+      $LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt RTO   0.001:2.0 same  "Run Total Precip"     "inches"  $DOMAIN_NAME comp2 >& $LAPS_DATA_ROOT/log/rto_fcst_comp2.log
+
+echo "$LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt TPW   0.:4. same  '"Integrated Water Vapor"'    "cm"  $DOMAIN_NAME  >& $LAPS_DATA_ROOT/log/tpw_fcst.log"
+      $LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt TPW   0.:4. same   "Integrated Water Vapor"     "cm"  $DOMAIN_NAME  >& $LAPS_DATA_ROOT/log/tpw_fcst.log
+
+echo "$LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt TPW   0.:4. same  '"Integrated Water Vapor"'    "cm"  $DOMAIN_NAME comp >& $LAPS_DATA_ROOT/log/tpw_fcst_comp.log"
+      $LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt TPW   0.:4. same   "Integrated Water Vapor"     "cm"  $DOMAIN_NAME comp >& $LAPS_DATA_ROOT/log/tpw_fcst_comp.log
+
+echo "$LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt TPW   0.:4. same  '"Integrated Water Vapor"'    "cm"  $DOMAIN_NAME comp2 >& $LAPS_DATA_ROOT/log/tpw_fcst_comp2.log"
+      $LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt TPW   0.:4. same   "Integrated Water Vapor"     "cm"  $DOMAIN_NAME comp2 >& $LAPS_DATA_ROOT/log/tpw_fcst_comp2.log
+
+echo "$LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt U3  -10.:30. same  '"U Wind Component" "m/s"'  $DOMAIN_NAME >& $LAPS_DATA_ROOT/log/u3_fcst.log"
+      $LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt U3  -10.:30. same   "U Wind Component" "m/s"   $DOMAIN_NAME >& $LAPS_DATA_ROOT/log/u3_fcst.log
+
+echo "$LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt V3  -20.:20. same  '"V Wind Component" "m/s"'  $DOMAIN_NAME >& $LAPS_DATA_ROOT/log/v3_fcst.log"
+      $LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt V3  -20.:20. same   "V Wind Component" "m/s"   $DOMAIN_NAME >& $LAPS_DATA_ROOT/log/v3_fcst.log
+
+echo "$LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt W3   0.:20. same '"Volume Wind"'    "m/s"  $DOMAIN_NAME  >& $LAPS_DATA_ROOT/log/w3_fcst.log"
+      $LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt W3   0.:20. same  "Volume Wind"     "m/s"  $DOMAIN_NAME  >& $LAPS_DATA_ROOT/log/w3_fcst.log
+
+echo "$LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt W3   0.:20. same '"Volume Wind"'    "m/s"  $DOMAIN_NAME comp >& $LAPS_DATA_ROOT/log/w3_fcst_comp.log"
+      $LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt W3   0.:20. same  "Volume Wind"     "m/s"  $DOMAIN_NAME comp >& $LAPS_DATA_ROOT/log/w3_fcst_comp.log
+
+echo "$LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt W3   0.:20. same '"Volume Wind"'    "m/s"  $DOMAIN_NAME comp2 >& $LAPS_DATA_ROOT/log/w3_fcst_comp2.log"
+      $LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt W3   0.:20. same  "Volume Wind"     "m/s"  $DOMAIN_NAME comp2 >& $LAPS_DATA_ROOT/log/w3_fcst_comp2.log
+
+echo "$LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt T3  -4.:4. same  '"3-D Temperature"'    "Deg C"  $DOMAIN_NAME  >& $LAPS_DATA_ROOT/log/t3_fcst.log"
+      $LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt T3  -4.:4. same   "3-D Temperature"     "Deg C"  $DOMAIN_NAME  >& $LAPS_DATA_ROOT/log/t3_fcst.log
+
+echo "$LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt T3  -4.:4. same  '"3-D Temperature"'    "Deg C"  $DOMAIN_NAME comp >& $LAPS_DATA_ROOT/log/t3_fcst_comp.log"
+      $LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt T3  -4.:4. same   "3-D Temperature"     "Deg C"  $DOMAIN_NAME comp >& $LAPS_DATA_ROOT/log/t3_fcst_comp.log
+
+echo "$LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt T3  -4.:4. same  '"3-D Temperature"'    "Deg C"  $DOMAIN_NAME comp2 >& $LAPS_DATA_ROOT/log/t3_fcst_comp2.log"
+      $LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt T3  -4.:4. same   "3-D Temperature"     "Deg C"  $DOMAIN_NAME comp2 >& $LAPS_DATA_ROOT/log/t3_fcst_comp2.log
+
+echo "$LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt S8A 0.:300. same '"11 micron IR Sat" "Deg K"' $DOMAIN_NAME >& $LAPS_DATA_ROOT/log/s8a_fcst.log"
+      $LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt S8A 0.:300. same  "11 micron IR Sat" "Deg K"  $DOMAIN_NAME >& $LAPS_DATA_ROOT/log/s8a_fcst.log
+
+echo "$LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt S8A 0.:300. same '"11 micron IR Sat" "Deg K"' $DOMAIN_NAME comp >& $LAPS_DATA_ROOT/log/s8a_fcst_comp.log"
+      $LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt S8A 0.:300. same  "11 micron IR Sat" "Deg K"  $DOMAIN_NAME comp >& $LAPS_DATA_ROOT/log/s8a_fcst_comp.log
+
+echo "$LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt S8A 0.:300. same '"11 micron IR Sat" "Deg K"' $DOMAIN_NAME comp2 >& $LAPS_DATA_ROOT/log/s8a_fcst_comp2.log"
+      $LAPSINSTALLROOT/etc/verif/verif_forecast.csh $LAPS_DATA_ROOT $NTIMES pt S8A 0.:300. same  "11 micron IR Sat" "Deg K"  $DOMAIN_NAME comp2 >& $LAPS_DATA_ROOT/log/s8a_fcst_comp2.log
+
+
+# Montage of the reflectivity and solar images
+if (-d /w3/lapb) then
+    echo "Making reflectivity and solar montages: log file is $LAPS_DATA_ROOT/log/followup_verif_montage.log"
+    echo @PERL@ @prefix@/etc/followup_verif.pl -r $LAPS_DATA_ROOT -d $DOMAIN_NAME -y $3 -t $N_VERIF_TIMES
+         @PERL@ @prefix@/etc/followup_verif.pl -r $LAPS_DATA_ROOT -d $DOMAIN_NAME -y $3 -t $N_VERIF_TIMES > $LAPS_DATA_ROOT/log/followup_verif_montage.log
+endif
+
+date -u
+
+#echo "cp $LAPS_DATA_ROOT/time/modeltime.dat $LAPS_DATA_ROOT/time/modeltime.dat.done"
+#      cp $LAPS_DATA_ROOT/time/modeltime.dat $LAPS_DATA_ROOT/time/modeltime.dat.done
+
+echo "cp $LAPS_DATA_ROOT/time/modelvtime.dat $LAPS_DATA_ROOT/time/modelvtime.dat.done"
+      cp $LAPS_DATA_ROOT/time/modelvtime.dat $LAPS_DATA_ROOT/time/modelvtime.dat.done

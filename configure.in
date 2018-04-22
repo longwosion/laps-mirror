@@ -1,0 +1,554 @@
+dnl Process this file with autoconf to produce a configure script.
+sinclude(./aclocal.m4)dnl
+sinclude(./acfortran.m4)dnl
+AC_INIT_LAPS(src/lib/regex.c)
+AC_CONFIG_HEADER(src/include/config.h)
+dnl
+dnl override presets with user input if present
+dnl
+if test -n "$user_cflags"
+then
+  CFLAGS="$user_cflags"
+fi
+if test -n "$user_fflags"
+then
+  FFLAGS="$user_fflags"
+  LITTLEFLAGS="$user_fflags"
+fi
+
+if test -n "$user_optimize"
+then
+  C_OPT="$user_optimize"
+  F_OPT="$user_optimize"
+fi
+
+if test "$prefix" = "NONE" 
+then
+  prefix=$ac_default_prefix
+fi
+if test "$datadir" = '${prefix}/share'
+then
+  datadir="$prefix/domains" # datadir="$prefix/data"
+fi
+echo "Installing data in $datadir"
+
+dnl
+dnl Check for host architecture
+# 
+
+ARCHIVE="ar"
+ANSICFLAGS=$CFLAGS
+dnl
+dnl guess arch if not set by user
+dnl
+AC_INIT_ARCH($arch)
+AC_PROG_CC
+if test "$GCC"
+then
+  DBFLAGS="-g"
+else
+  DBFLAGS="-g -C"
+fi
+dnl guess c compiler if not set by user
+dnl if test -z "$CC" 
+dnl then
+dnl   AC_CHECK_PROGS(CC,xlc cc xlC gcc CC pgcc,,$PATH)
+dnl fi
+dnl
+dnl Find path to netcdf ***required by LAPS***
+dnl
+echo "PATH = $PATH"
+AC_PROG_GENERIC(NETCDF, ncdump, libnetcdf.a, netcdf.inc)
+
+dnl
+dnl Find path to perl  ***required by LAPS***
+dnl
+AC_CHECK_PROGS(PERL,perl perl5,,$PATH)
+AC_PATH_PROG(PERL,$PERL )
+
+dnl
+dnl Find path to csh  ***required by LAPS***
+dnl
+AC_CHECK_PROGS(CSH,csh,,$PATH)
+AC_PATH_PROG(CSH,$CSH )
+AC_PROG_GCC_TRADITIONAL
+
+echo "GCC = $GCC"
+#if test "$GCC" 
+#then
+#  CPPFLAGS = "-C"     
+#fi
+
+dnl Set OTHERLIBS to -lgcc only when $CC contains gcc
+echo "CC = $CC"
+grep 'gcc' << EOF
+$CC
+EOF
+
+if test $? -eq 0
+then
+  OTHERLIBS="$OTHERLIBS -lgcc"
+fi
+
+LIBPATHFLAG=-L
+if test "$arch" = "hpux" 
+then
+  FFLAGS="$FFLAGS +FPVZO -K" 
+  LITTLEFLAGS="$LITTLEFLAGS +FPVZO -K" 
+  FIXED="+source=fixed"
+  FREE="+source=free +langlvl=90"
+  C_OPT="-O2 +Onolimit"
+  F_OPT="-O2 +Onolimit"
+  LIBPATHFLAG=-Wl,-L
+  echo "GCC = $GCC"
+  if test -z "$GCC"
+  then
+      OTHERLIBS="$OTHERLIBS -lm"
+      CFLAGS="$CFLAGS -Aa"
+      CPPFLAGS="$CPPFLAGS "
+  fi
+  W3="-DHP"
+fi
+if test "$arch" = "rs6000" 
+then
+  FFLAGS="$FFLAGS"
+  LITTLEFLAGS="$LITTLEFLAGS"
+  FIXED="-qfixed"
+  FREE="-qfree=f90 -qsuffix=f=f90"
+  DBFLAGS="$DBFLAGS -qflttrap=overflow:underflow:zerodivide"
+  C_OPT="-O3 -qstrict"
+  F_OPT="-O3 -qstrict"
+  W3="-DIBM4 -DAIX"
+fi
+if test "$arch" = "alpha"
+then
+  FFLAGS="$FFLAGS -convert big_endian -fpe3"
+  LITTLEFLAGS="$LITTLEFLAGS -convert little_endian -fpe3"
+  FIXED="-fixed"
+  FREE="-free"
+  C_OPT="-O4"
+  F_OPT="-O4"
+  CFLAGS="$CFLAGS -DLITTLE -DSWAPBYTE"
+  W3="-DALPHA"
+fi  
+if test "$arch" = "sun4" 
+then
+    AC_MSG_ERROR(LAPS no longer supports the sun4 OS)
+dnl  FFLAGS="$FFLAGS -native -xl -i4 -fnonstd"
+dnl  LITTLEFLAGS="$LITTLEFLAGS -native -xl -i4 -fnonstd"
+dnl   C_OPT="-O"
+dnl   F_OPT="-O"
+fi
+if test -z "$FC"
+then
+  AC_PROG_FC
+fi
+AC_FC_CPP
+
+AC_FC_INC
+
+AC_FC_BYTE_UNSIGNED
+AC_FC_BYTE_SIGNED
+AC_FC_INT1
+dnl 
+dnl Try to figure out if we have an f90 compiler
+dnl
+grep '90' << EOF
+$FC
+EOF
+if test $? -eq 0 
+then
+  CPPFLAGS="$CPPFLAGS -DF90"
+  if test "$arch" = "rs6000"
+  then
+    W3="-DIBM4 -DAIX"
+  fi
+
+  if test "$arch" = "solaris"
+  then
+dnl module flags for solaris 
+	FFLAGS="$FFLAGS -M\$(SRCROOT)/src/lib -M\$(SRCROOT)/src/lib/modules"
+	LITTLEFLAGS="$LITTLEFLAGS -M\$(SRCROOT)/src/lib -M\$(SRCROOT)/src/lib/modules"
+        FIXED="-fixed"
+        FREE="-free"
+dnl
+dnl The solaris cc has a bug in the preprocessor
+dnl 
+	CPP="/usr/ucb/cc -P"
+else
+	FFLAGS="$FFLAGS -I\$(SRCROOT)/src/lib"
+	LITTLEFLAGS="$LITTLEFLAGS -I\$(SRCROOT)/src/lib"
+fi
+fi
+
+dnl  Check to see if we are running Portland Group
+dnl  compilers on a PC. If so, set flags appropriately.
+
+dnl  Test for pgf compiler 
+grep 'pgf' << EOF
+$FC
+EOF
+if test $? -eq 0
+then
+  if test "$arch" = "i686"
+  then
+    FFLAGS="$FFLAGS -Mnofree -byteswapio -i4 -Bstatic"
+    DBFLAGS="$DBFLAGS -Mbounds"
+    LITTLEFLAGS="$LITTLEFLAGS -Mnofree -i4 -Bstatic"
+    FIXED="-Mnofree"
+    FREE="-Mfree"
+    CPP="$FC"
+    CFLAGS="$CFLAGS -DLITTLE -DSWAPBYTE"
+    C_OPT="-O2"
+    F_OPT="-O2"
+  fi
+  if test "$arch" = "i386"
+  then
+    FFLAGS="$FFLAGS -Mnofree -byteswapio -i4 -Bstatic"
+    DBFLAGS="$DBFLAGS -Mbounds"
+    LITTLEFLAGS="$LITTLEFLAGS -Mnofree -i4 -Bstatic"
+    FIXED="-Mnofree"
+    FREE="-Mfree"
+    CPP="$FC"
+    CFLAGS="$CFLAGS -DLITTLE -DSWAPBYTE"
+    C_OPT="-O2"
+    F_OPT="-O2"
+  fi
+  if test "$arch" = "x86_64"
+  then
+    FFLAGS="$FFLAGS -Mnofree -byteswapio -i4 -Bstatic"
+    DBFLAGS="$DBFLAGS -Mbounds"
+    LITTLEFLAGS="$LITTLEFLAGS -Mnofree -i4 -Bstatic"
+    FIXED="-Mnofree"
+    FREE="-Mfree"
+    CPP="$FC"
+    CFLAGS="$CFLAGS -DLITTLE -DSWAPBYTE"
+    C_OPT="-O2"
+    F_OPT="-O2 -fastsse"
+  fi
+fi  
+
+dnl  For W3, test for LINUX build
+if test "$arch" = "x86_64" || test "$arch" = "i686" || test "$arch" = "i386"
+then
+  W3="-DLINUX"
+fi  
+
+dnl  For W3 and CFLAGS, test for MAC (Darwin)
+if test "$arch" = "unknown" 
+then
+  if test "`/usr/bin/uname -s`" = "Darwin"
+  then
+    W3="-DMAC"
+    CFLAGS="$CFLAGS -DMAC"
+  fi
+fi
+
+dnl  For W3, test SWAPBYTE flag
+grep 'SWAPBYTE' << EOF
+$CFLAGS
+EOF
+if test $? -eq 0
+then
+  W3="$W3 -DSWAPBYTE"
+fi  
+
+dnl  Test for pgcc compiler 
+grep 'pgcc' << EOF
+$CC
+EOF
+if test $? -eq 0
+then
+  if test "$arch" = "x86_64"
+  then
+    C_OPT="-O2 -fastsse"
+  fi
+fi  
+
+dnl  Check to see if we are running the mpif90
+dnl  compiler on a PC. If so, set flags appropriately.
+
+grep 'mpif90' << EOF
+$FC
+EOF
+if test $? -eq 0
+then
+  if test "$arch" = "i686"
+  then
+    FFLAGS="$FFLAGS -w90 -w95 -cm"
+    LITTLEFLAGS="$LITTLEFLAGS -w90 -w95 -cm"
+    FREE="-FR"
+    C_OPT=""
+    F_OPT=""
+  fi
+
+  if test "$arch" = "x86_64"
+  then
+    FFLAGS="$FFLAGS -Mnofree -byteswapio -i4 -Bstatic"
+    DBFLAGS="$DBFLAGS -Mbounds"
+    LITTLEFLAGS="$LITTLEFLAGS -Mnofree -i4 -Bstatic"
+    FIXED="-Mnofree"
+    FREE="-Mfree"
+    CPP="$FC"
+    CFLAGS="$CFLAGS -DLITTLE -DSWAPBYTE"
+    C_OPT="-O2"
+    F_OPT="-O2 -fastsse"
+  fi
+fi  
+
+
+dnl  Default setting for DBCFLAGS
+DBCFLAGS="-g"
+
+dnl  Check to see if we are running the ifort
+dnl  compiler. If so, set flags appropriately.
+
+grep 'ifort' << EOF
+$FC
+EOF
+if test $? -eq 0
+then
+    FFLAGS="$FFLAGS -warn usage"
+    LITTLEFLAGS="$LITTLEFLAGS -warn usage"
+    DBFLAGS="$DBFLAGS -O0 -traceback -ftrapuv"
+    FREE="-FR"
+    C_OPT="-O3"
+    F_OPT="-O3"
+    OTHERLIBS="$OTHERLIBS -lnetcdff"
+
+
+dnl Set DBCFLAGS to smaller set if C compiler is other than 'icc'
+    grep 'icc' << EOF
+    $CC
+EOF
+
+    if test $? -eq 0
+    then
+        DBCFLAGS="$DBFLAGS"
+    else
+        DBCFLAGS="-g"
+    fi  
+
+fi  
+
+dnl  Check to see if we are running the gfortran
+dnl  compiler. If so, set flags appropriately.
+
+grep 'gfortran' << EOF
+$FC
+EOF
+if test $? -eq 0
+then
+    FFLAGS="$FFLAGS -fd-lines-as-comments -ffree-line-length-none"
+fi
+
+dnl  Check to see if we are running the lahey
+dnl  compiler. If so, set flags appropriately.
+
+grep 'lahey' << EOF
+$FC
+EOF
+if test $? -eq 0
+then
+  OTHERLIBS="$OTHERLIBS -lc"
+fi
+
+echo "CFLAGS = $CFLAGS"
+echo "DBCFLAGS = $DBCFLAGS"
+echo "FFLAGS = $FFLAGS"
+echo "DBFLAGS = $DBFLAGS"
+
+
+AC_F90_FUNC_TRIGD
+if test $USE_TRIGD -eq 1 
+then
+  CPPFLAGS="$CPPFLAGS -DUSE_TRIGD"
+fi
+
+# AC_FC_FUNC_GETENV
+dnl
+dnl AC_FC_NAMES sets WDEF to describe fortran externals to c
+dnl
+AC_FC_NAMES
+CPPFLAGS="$CPPFLAGS $WDEF"
+AC_FC_FUNC_IMPLICIT_ALLOC
+if test $DYNAMIC -eq 1
+then
+  CPPFLAGS="$CPPFLAGS -DDYNAMIC"
+else
+  CPPFLAGS="$CPPFLAGS -DNODYNAMIC"
+fi
+
+dnl Hardwired MULTI_EXEC for now
+CPPFLAGS="$CPPFLAGS -DMULTI_EXEC"
+
+dnl Hardwired for WJET for now
+PBSHOME="/usr/local/fsl"
+
+dnl For Grib decoder software some W3 libs need to have
+dnl architecture defined as -DCRAY90 -DHP -DSGI -DLINUX
+dnl -DLINUXF90 -DVPP5000 (Fujitsu) -DIBM4 -DIBM8 -DALPHA -DMAC
+dnl use WDEF to describe fortran externals to c
+dnl Also, set wordsize to -DBIT64 for 64 bit architecture, else assume 32
+  CDEGRIBFLAGS="$W3 $WDEF"
+
+dnl
+dnl How to compile fortran with ncarg?
+dnl
+AC_FC_FUNC_NCARGFC(NCARGFC)
+AC_SUBST(LIBPATHFLAG)
+AC_SUBST(CPPFLAGS)
+AC_SUBST(PERL)
+AC_SUBST(CSH)
+AC_SUBST(FFLAGS)
+AC_SUBST(LITTLEFLAGS)
+AC_SUBST(FREE)
+AC_SUBST(FIXED)
+AC_SUBST(C_OPT)
+AC_SUBST(F_OPT)
+AC_SUBST(OTHERLIBS)
+AC_SUBST(ARCHIVE)
+AC_SUBST(FC_USE_TRIGD)
+AC_SUBST(DEGRIBFLAGS)
+AC_SUBST(CDEGRIBFLAGS)
+AC_SUBST(PBSHOME)
+
+dnl Checks for programs.
+dnl AC_PROG_AWK
+
+
+AC_PROG_MAKE_SET
+AC_PROG_RANLIB
+# AC_PROG_INSTALL
+INSTALL='$(SRCROOT)/util/install-sh'
+AC_SUBST(INSTALL)
+AC_SUBST(INCLUDE)
+AC_SUBST(DBFLAGS)
+AC_SUBST(DBCFLAGS)
+
+dnl Checks for libraries.
+dnl Replace `main' with a function in -lcurses:
+# AC_CHECK_LIB(curses, main)
+dnl Replace `main' with a function in -lm:
+# AC_CHECK_LIB(m, main)
+dnl Replace `main' with a function in -lnssl:
+# AC_CHECK_LIB(nssl, main)
+dnl Replace `main' with a function in -ltermcap:
+# AC_CHECK_LIB(termcap, main)
+dnl Replace `main' with a function in -lz:
+AC_CHECK_LIB(z, main)
+dnl Replace `main' with a function in -lpng:
+AC_CHECK_LIB(png, main)
+dnl Replace `main' with a function in -ljasper:
+AC_CHECK_LIB(jasper, main)
+
+dnl for Grib2 libraries: libjasper.a, libpng.a, libz.a
+  AC_PROG_GRIB2
+
+dnl Checks for header files.
+AC_HEADER_DIRENT
+AC_HEADER_STDC
+AC_CHECK_HEADERS(fcntl.h malloc.h strings.h sys/ioctl.h sys/time.h unistd.h)
+
+dnl Checks for typedefs, structures, and compiler characteristics.
+AC_C_BIGENDIAN
+AC_CHECK_SIZEOF(short)
+AC_CHECK_SIZEOF(int)
+AC_CHECK_SIZEOF(long)
+ 
+AC_C_CONST
+AC_TYPE_OFF_T
+AC_TYPE_SIZE_T
+AC_STRUCT_TM
+
+dnl Checks for library functions.
+AC_FUNC_ALLOCA
+AC_TYPE_SIGNAL
+AC_CHECK_FUNCS(gettimeofday re_comp regcomp)
+
+#LAPS_PARMS_CONFIG
+
+AC_OUTPUT(src/include/trigd.inc
+          src/include/makefile.inc
+          util/cronfile
+	  etc/LapsRadar.pl
+          etc/LapsRadar_RSA.pl
+          etc/casererun.pl
+          etc/check_release.csh
+          etc/change-center.pl
+          etc/cloud.pl
+          etc/cronfile.pl
+          etc/followup_fcst.pl
+          etc/fxalogdir.pl
+          etc/generate_images.pl
+          etc/ingest_stageIV_files.pl
+          etc/laps_input_from_archive.pl
+          etc/laps_driver.pl
+	  etc/laps_monitor.pl
+          etc/lfmpost.pl
+          etc/lq3driver.pl
+          etc/qsub
+          etc/qsub_sge
+          etc/qsub_wait
+          etc/rsync_ensemble_out.sh
+          etc/sched.pl
+          etc/sched.sh
+          etc/sched_sys.pl
+          etc/localize_optran.pl
+          etc/localize_domain.pl
+          etc/makedatadirs.pl
+          etc/msslaps.csh
+          etc/prebuild_sms.pl
+          etc/purger.pl
+          etc/purge_wideband.pl
+          etc/purge_w3_fcst2d.pl
+          etc/putFile_fire1.pl
+          etc/read_nl.pl
+          etc/recurs_iter.pl
+          etc/ruc_grib2netcdf.csh
+          etc/gfs_grib2netcdf.csh
+          etc/sendLAPS.pl
+          etc/send_lapsprep.pl
+          etc/sfc.pl
+          etc/systime.pl
+          etc/tarlapstime.sh
+          etc/temp.pl
+          etc/timeconv.pl
+          etc/wfo-cwa-latlon-bounds.pl
+          etc/wfo_post.pl
+          etc/wfo-relocalization.pl
+          etc/wind.pl
+          etc/window_domain_rt.pl
+          etc/wait4lapsprep.pl
+          etc/wrfpost.pl
+          etc/xferData.pl
+          etc/xferlaps.csh
+          etc/models/lfmpost_scp_fuafsf.pl
+          etc/models/lfmpost_test.csh
+          etc/models/mdlpost.csh
+          etc/models/run_qsub_lfmp.sh 
+          etc/models/subset_wrfout.csh
+          etc/verif/allsky_analysis.csh
+          etc/verif/ingest_rerun_verif.csh
+          etc/verif/verif_fcst_driver.csh
+          etc/verif/verif_forecast.csh
+          etc/verif/cloud_analysis.csh
+          etc/verif/cloud_forecast.csh
+          etc/verif/radar_forecast.csh
+          etc/verif/run_qsub_verif.sh
+          etc/www/nph-laps.cgi
+          etc/www/laps.cgi
+          etc/www/laps_products.cgi
+          gui/make_gui.pl
+          gui/install_perlTk.sh
+          gui/guiTk/ui_system_tools.pl)
+
+chmod +x etc/*.*sh
+chmod +x etc/qsub*
+chmod +x etc/models/*.*sh
+chmod +x etc/www/nph-laps.cgi
+chmod +x etc/www/laps.cgi
+chmod +x etc/www/*.*sh
+chmod +x etc/verif/*.*sh
+
+./util/fix_net "C      use trigd" "!      use trigd" src/include/trigd.inc

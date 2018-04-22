@@ -1,0 +1,5 @@
+! @configure_input@
+!
+! Uncomment the following if the degree based trig functions are not
+! intrinsic in the f90 compiler  
+@FC_USE_TRIGD@

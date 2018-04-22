@@ -1,0 +1,27 @@
+
+  Tree diagram outlining the source code for 'gridgen_model.exe'
+
+  Subroutine Name                         File Name:             
+  ---------------                         ----------             
+
+gridgen_model                           gridgen_model.f
+    gridmap_sub                               "
+        compute_latlon                  gridgen_utils.f
+        proc_geodat                     proc_geodat.f           39%
+            read_dem                    gridgen_utils.f         14% 
+                ia                            "                 xx%
+            read_dem_g                        "                 20%
+        geodat                          gridgen_model.f
+            sfcopqr                           "
+                read_dem                gridgen_utils.f         14%
+                    read_binary_field   lib/cio.c
+                    ia                  gridgen_utils.f
+                read_dem_g                    "                 20%
+                compute_categories      gridgen_model.f
+                gdtost2                 lib/gridconv.f 
+                    binom                     "
+        alt_10by10_all                  alt_all.f
+        read_wrfstatic                  read_wrfstatic.f
+        get_gridgen_var                 gridgen_utils.f
+        check_domain
+        put_laps_static                 put_laps_static.f

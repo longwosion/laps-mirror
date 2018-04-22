@@ -1,0 +1,3 @@
+/usr/nfs/lapb/wideband
+/public/data/radar/wsr88d
+kama kcys kddc kfdr kftg kfws kgld kict kinx klbb ktlx kvnx

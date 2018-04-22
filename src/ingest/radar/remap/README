@@ -1,0 +1,58 @@
+
+
+MODULE NAME                                         FILE
+......................                              ................
+
+main                                                remap.f
+    get_remap_parms                                    "
+    remap_sub                                          "
+        radar_init (1st call)                       netcdfio.f
+            check_input_file                           "
+            get_tilt_netcdf_hdr                     get_tilt_netcdf.f
+            get_tilt_netcdf_data                       "
+            get_vol_netcdf_hdr                      get_vol_netcdf.f
+            get_vol_netcdf_data                        "
+                read_netcdf_vol                        "
+        get_radarname                               netcdfio.f
+        get_altitude                                   "
+        get_latitude                                   "
+        get_longitude                                  "
+        lut_gen                                     lut_gen.f
+        get_first_gate                              netcdfio.f
+        get_data_field                                 "
+        fill_common                                 remap_ftn/fill_common.f
+        radar_init (2nd call)                       netcdfio.f
+            check_input_file                           "
+            get_tilt_netcdf_hdr                     get_tilt_netcdf.f
+            get_tilt_netcdf_data                       "
+            get_vol_netcdf_hdr                      get_vol_netcdf.f
+            get_vol_netcdf_data                        "
+        read_data_88d                               remap_ftn/readdata.f
+            get_scandata                            remap_ftn/get_scandata.f
+            get_azimuths_deg                        remap_ftn/get_azimuths_deg.f
+            lgate_lut_gen                           lut_gen.f
+            ld_ray                                  remap_ftn/ld_ray.f
+            rayqckz                                 rayqckz.f
+            unfold                                  unfold.f
+                get_azimuindex                         "
+                del_isolated                           "
+                simple_unf                             "
+                gpunfold                               "
+        remap_process                               remap_process.f
+            get_laps_domain_95                      lib/lapsgrid.f
+            ref_fill_horz                           remap_ftn/ref_fill_horz.f
+            put_compressed_multi_3d                 laps_io.f
+            put_laps_multi_3d                          "
+            put_remap_vrc                           remap_process.f
+                ref_fill_horz                       remap_ftn/ref_fill_horz.f
+
+
+Notes: Source code files are mainly in these directories
+      
+       src/ingest/radar/remap            (this directory)
+       src/lib/radar/remap_ftn
+       src/lib
+
+       The conversion from counts to reflectivity and velocity is mainly
+       done (and illustrated) in subroutine 'get_data_field'.
+

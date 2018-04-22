@@ -1,0 +1,140 @@
+
+
+      Below is an example of our ASCII 'snd' files that we use for input into 
+      LAPS. The filename for this is '961581200.snd' (yydddhhmm). We store 
+      one of these time stamped files for each analysis cycle in the 
+      'nest7grid/lapsprd/snd' directory. The time stamp on the SND file should
+      thus match the 'systime.dat' file. A reliable way to populate these files
+      is to call the subroutine 'write_snd' located in this directory.
+
+      The first row contains Station ID, # of levels, lat, lon (- is West), 
+      elevation (meters above MSL), and identifier. This is in a set format 
+      as shown below.
+
+      write(11,511,err=998)
+     1             wmostanum(isnd),n_good_levels,stalat(isnd)
+     1            ,stalon(isnd),staelev(isnd),(staname(ic,isnd),ic=1,5)       
+     1            ,a9time_raob,c8_obstype
+
+  511 format(i12,i12,f11.4,f15.4,f15.0,1x,5a1,3x,a9,1x,a8)
+
+      The subsequent rows contain (in free format) height (meters-MSL), 
+      pressure (mb), temperature (C), Dewpoint (C), Wind Direction (Deg), Wind 
+      Speed (m/s). The missing data flag is 1e37. Please note that in some cases 
+      the height is given but not the pressure. On rare occasions, we may have 
+      the pressure, but not the height. In the ideal situation, we would like 
+      to have both heights and pressures for all the levels. This can be tricky 
+      as the raw RAOB data may have one or the other depending on whether it 
+      is mandatory, significant wind, or significant temperature / dewpoint 
+      data. The analyses will do their best to fill in missing heights or
+      pressures as long as one of them is available.
+
+      Note that all the RAOB mandatory and significant levels must be 
+      interleaved together and sorted by increasing height (decreasing  
+      pressure). 
+   
+      The 'snd' files may contain some soundings that lie outside the LAPS 
+      domain. These are generally screened out during the analysis step.
+
+      Allowed values of 'obstype' are as follows:
+
+                           'RAOB    ' 
+                           'SATSND  '
+                           'GOES12  '
+                           'DROPSND '
+
+      The 'a9time' is the time the balloon is in the mid-troposphere, or
+      release time plus 30min.
+
+      There can be as many observations in a particular SND file
+      as you want. The only limitation is that the observation times
+      be within +/-laps_cycle_time of the nominal analysis time 
+      (in systime.dat). This would ensure that the data fits within the 
+      time window checks in the analyses.
+
+      Dropsonde station elevation should probably be set to a missing value
+      of -999. I think for IHOP it actually was the height of the lowest 
+      sonde measurement. A missing data value (-999.) may work better to 
+      ensure that the lowest dropsonde measurement doesn't somehow slip 
+      into the surface analyses.
+
+      It is advisable to name dropsondes and satellite soundings with sequential
+      names (within each file) to help in tracking their processing in the 
+      various log files.
+
+-------------------------------------------------------------------------------
+
+       72357          21    35.2300       -97.4700           362. OUN     991760012 RAOB    
+ 77.00000000 1000.000000 0.9999999934E+37 0.9999999934E+37 0.9999999934E+37 0.9999999934E+37
+ 362.0000000 968.0000000 20.85000610 17.15000534 160.0000000 6.172800064
+ 609.5999756 0.9999999934E+37 0.9999999934E+37 0.9999999934E+37 135.0000000 7.716000080
+ 756.0000000 925.0000000 26.25000000 8.250000000 120.0000000 7.201600075
+ 914.4000244 0.9999999934E+37 0.9999999934E+37 0.9999999934E+37 105.0000000 6.687200069
+ 1219.199951 0.9999999934E+37 0.9999999934E+37 0.9999999934E+37 100.0000000 4.629600048
+ 1496.000000 850.0000000 21.05001831 13.05001831 120.0000000 2.572000027
+ 1828.800049 0.9999999934E+37 0.9999999934E+37 0.9999999934E+37 220.0000000 3.600800037
+ 2133.600098 0.9999999934E+37 0.9999999934E+37 0.9999999934E+37 245.0000000 6.172800064
+ 2438.399902 0.9999999934E+37 0.9999999934E+37 0.9999999934E+37 255.0000000 6.687200069
+ 2743.199951 0.9999999934E+37 0.9999999934E+37 0.9999999934E+37 285.0000000 6.687200069
+ 3048.000000 0.9999999934E+37 0.9999999934E+37 0.9999999934E+37 305.0000000 7.201600075
+ 3146.000000 700.0000000 11.64999390 2.649993896 315.0000000 8.230400085
+ 3657.600098 0.9999999934E+37 0.9999999934E+37 0.9999999934E+37 325.0000000 9.259200096
+ 4267.200195 0.9999999934E+37 0.9999999934E+37 0.9999999934E+37 340.0000000 11.83119965
+ 4876.799805 0.9999999934E+37 0.9999999934E+37 0.9999999934E+37 345.0000000 11.83119965
+ 5486.399902 0.9999999934E+37 0.9999999934E+37 0.9999999934E+37 350.0000000 14.91760063
+ 5850.000000 500.0000000 -9.649993896 -15.64999390 350.0000000 12.86000061
+ 6096.000000 0.9999999934E+37 0.9999999934E+37 0.9999999934E+37 345.0000000 12.34560013
+ 7010.399902 0.9999999934E+37 0.9999999934E+37 0.9999999934E+37 320.0000000 15.43200016
+ 7530.000000 400.0000000 -19.84999084 -22.64999008 0.9999999934E+37 0.9999999934E+37
+       72363           0    35.2300      -101.7000          1094. AMA     991760000 RAOB    
+
+
+.............................................................................
+
+
+Here is a tree diagram outlining the source code in this directory...
+
+
+Subroutine Name                                 File Name
+---------------                                 ---------  
+snd_main                                        ingest_sounding.f
+    snd_sub                                           "
+        get_snd_parms                                 "
+        ingest_raob                             ingest_raob.f
+            get_raob_data                       ingest_raob_sub.f
+                main_sub                              "
+                    read_netcdf                       "
+                    sort_and_write                    "
+            get_raob_data_af                    ingest_raob_sub_af.f 
+            get_raob_data_cwb                   ingest_raob_sub_cwb.f
+            get_rtamps_data                     get_rtamps_data.f 
+                read_rtamps_data                      "
+                    read_rtamps_netcdf          read_rtamps_data.f
+                    write_snd                   lib/write_snd.f
+        ingest_drpsnd                           ingest_drpsnd.f 
+            get_drpsnd_data                     get_drpsnd_data.f
+                read_drpsnd_data                      "  
+                    read_drpsnd_netcdf                "    
+                    sort_and_write              ingest_raob_sub.f 
+                        write_snd               lib/write_snd.f
+            avapsread_sub                       avapsread_sub.f
+            combine_snd_file                    ingest_drpsnd.f
+                read_snd_data                   lib/read_snd_data.f
+                read_snd_data2                        "
+            get_drpsnd_data_cwb                 ingest_drpsnd_sub_cwb.f 
+        tower_driver_sub                        tower_driver.f
+            get_local_towerobs                  lib/get_local_towerobs.f
+                read_local_tower                      " 
+            write_snd                           write_snd.f
+        ingest_satsnd                           ingest_satsnd.f
+            get_satsnd_afwa                     ingest_satsnd_af.f
+            get_poes_data                       get_poes_data.f
+            read_poes_netcdf                          "
+        ingest_goessnd                          ingest_goessnd.f
+            process_goes_snd                    process_goes_snd.f
+        get_radiometer_data                     get_radiometer_data.f   
+            read_radiometer_data                      "
+                read_radiometer_netcdf                "  
+                write_snd                       lib/write_snd.f
+
+

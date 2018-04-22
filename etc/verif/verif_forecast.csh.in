@@ -1,0 +1,430 @@
+#!@CSH@ 
+
+# First argument is $LAPS_DATA_ROOT
+
+# Second argument is number of forecast time steps (including analysis)
+
+# Third argument is the type "pt" or "grid"
+
+# Fourth argument is the variable (upper case)
+
+# Fifth argument is the yrange
+
+# Sixth argument is the y2range
+
+# Seventh argument is the overall title variable
+
+# Eighth argument is the units
+
+# Ninth argument is domain name
+
+# Tenth argument is subtype (comp or comp2 - optional)
+
+setenv LAPSINSTALLROOT @prefix@
+setenv LAPS_DATA_ROOT $1
+setenv NLINE $2
+setenv TYPE $3
+setenv VAR $4
+setenv YRANGE $5
+setenv Y2RANGE $6
+setenv DOMAIN_NAME_IN $9
+setenv SUBTYPE $10          
+
+if ($SUBTYPE == "") then
+    setenv SUBDIR $TYPE
+    setenv DURATION ""
+    setenv SUMMARY_FILE /dev/null
+    echo "SUMMARY_FILE is $SUMMARY_FILE"
+else
+    setenv SUBDIR $TYPE/$SUBTYPE
+    if($SUBTYPE == "comp") then
+        setenv DURATION "7-day "
+    else
+        setenv DURATION "30-day "
+    endif
+    setenv SUMMARY_FILE $LAPS_DATA_ROOT/lapsprd/verif/$VAR/$TYPE/summary_$SUBTYPE.txt
+    echo "SUMMARY_FILE is $SUMMARY_FILE"
+    ls -l $SUMMARY_FILE
+endif
+
+setenv DOMAIN_NAME `echo $DOMAIN_NAME_IN | sed 's/_/ /g'`
+
+setenv VAR_LC `echo $VAR | gawk '{print tolower($0)}'`
+
+#setenv LAPS_DATA_ROOT /data/fab/projects/dwr
+
+setenv MODELTIME `head -1 $LAPS_DATA_ROOT/time/modelvtime.dat`
+setenv MODELTIME_HHMM `head -1 $LAPS_DATA_ROOT/time/modelvtime.dat | cut -c6-9`
+
+setenv MODEL_ASCIITIME `tail -1 $LAPS_DATA_ROOT/time/modelvtime.dat`
+
+setenv FILE $LAPS_DATA_ROOT/lapsprd/verif/$VAR/$SUBDIR/$MODELTIME.stats
+setenv MEMBERS_FILE $LAPS_DATA_ROOT/lapsprd/verif/members.txt
+
+setenv VERIF_INTVL `@PERL@ @prefix@/etc/read_nl.pl -d $LAPS_DATA_ROOT -n nest7grid.parms -v verif_intvl`
+@ VERIF_FCST_LEN = ( $NLINE - 1 ) * $VERIF_INTVL
+@ VERIF_FCST_LEN_HH = $VERIF_FCST_LEN / 3600
+#setenv VERIF_FCST_LEN `@PERL@ @prefix@/etc/read_nl.pl -d $LAPS_DATA_ROOT -n nest7grid.parms -v model_fcst_len`
+#setenv MODEL_FCST_LEN  `@PERL@ @prefix@/etc/read_nl.pl -d $LAPS_DATA_ROOT -n nest7grid.parms -v model_fcst_len`
+
+# Setup True Type fonts and related environment variables
+setenv GNUPLOT_DEFAULT_GDFONT VeraBd                
+
+if (-d /usr/X11R6/lib/X11/fonts/truetype) then
+    setenv GDFONTPATH /usr/X11R6/lib/X11/fonts/truetype
+else if (-d /usr/share/fonts/bitstream-vera) then
+    setenv GDFONTPATH /usr/share/fonts/bitstream-vera  
+else if (-d /usr/share/fonts/dejavu) then
+    setenv GDFONTPATH /usr/share/fonts/dejavu           
+    setenv GNUPLOT_DEFAULT_GDFONT DejaVuSans-Bold            
+else if (-d /usr/share/fonts/msttcore) then
+    setenv GDFONTPATH /usr/share/fonts/msttcore
+    setenv GNUPLOT_DEFAULT_GDFONT verdanab            
+else
+    setenv GDFONTPATH /dev/null
+endif
+
+setenv FONTFILE $GDFONTPATH/$GNUPLOT_DEFAULT_GDFONT.ttf
+
+if (-e $FONTFILE) then
+    echo "GNUPLOT FONT is $FONTFILE"                                    
+#   setenv TERM_FONT 'enhanced font "'$GNUPLOT_DEFAULT_GDFONT', 12"'
+    setenv TERM_FONT 'enhanced'
+    setenv DEFAULT_FONT 'font "'$GNUPLOT_DEFAULT_GDFONT',12"'
+    setenv TITLE_FONT 'font "'$GNUPLOT_DEFAULT_GDFONT',20"'
+    setenv MEMBER_FONT 'font "'$GNUPLOT_DEFAULT_GDFONT',16"'
+    if (-d /w3/lapb) then
+        if ($SUBTYPE == "") then 
+            setenv KEY_WIDTH +3
+        else # 7/30 day
+            setenv KEY_WIDTH +8
+        endif
+    else
+        setenv KEY_WIDTH -3 
+    endif
+    setenv KEY_HEIGHT 0.3
+    setenv KEY_SPACING 0.7
+    setenv TH "{/$GNUPLOT_DEFAULT_GDFONT=8 "
+    setenv TF \}
+else
+    echo "FONTFILE $FONTFILE does not exist"
+    setenv TERM_FONT ""                             
+    setenv DEFAULT_FONT ""
+    setenv TITLE_FONT ""
+    setenv MEMBER_FONT ""
+    setenv KEY_FONT ""
+    setenv KEY_WIDTH 1
+    setenv KEY_HEIGHT 0
+    setenv KEY_SPACING 1.0
+    setenv TH ""             
+    setenv TF ""
+endif
+
+if ($SUMMARY_FILE != /dev/null && -e $SUMMARY_FILE) then # Percentage will be present
+    setenv L_PLOT_CRITERIA `tail -2 $SUMMARY_FILE | head -1`
+    setenv PCT_SUCCESS     `tail -1 $SUMMARY_FILE`
+#   setenv L_PLOT_CRITERIA T  # for testing
+    if (-d /w3/lapb) then
+        setenv KEY_WIDTH -7 
+    else
+        setenv KEY_WIDTH -10
+    endif
+    setenv XKEY 0.225
+else                                                     # Percentage will not be present
+    setenv L_PLOT_CRITERIA T 
+    if (-d /w3/lapb) then
+        setenv KEY_WIDTH -5
+    else
+        setenv KEY_WIDTH -5
+    endif
+    setenv XKEY 0.180
+endif
+
+echo " "
+echo "inputs..."
+echo "TYPE = $TYPE"  
+echo "KEY_WIDTH = $KEY_WIDTH"  
+echo "SUBTYPE = $SUBTYPE"  
+echo "SUBDIR = $SUBDIR"  
+echo "VAR = $VAR"  
+echo "FILE = $FILE"  
+echo "VERIF_FCST_LEN = $VERIF_FCST_LEN"
+echo "VERIF_FCST_LEN_HH = $VERIF_FCST_LEN_HH"
+ls -l $FILE                                                     
+
+# Stats Files In General:
+# 1st column is mean forecast value at the stations
+# 2nd column is mean observed value at the stations
+# 3rd column is RMSE
+#
+# For WSF (Surface Wind) and W3 (3-D Wind)
+# 1st column is the rms of U
+# 2nd column is the rms of V
+# 3rd column is RMS vector wind
+
+@ NLINE = $NLINE + 1
+
+# obtain xrange times from the data file
+setenv STARTTIME1 `head -2      $FILE | tail -1 | cut -c2-12` ; echo $STARTTIME1
+setenv STARTTIME2 `head -2      $FILE | tail -1 | cut -c14-24`; echo $STARTTIME2
+setenv STOPTIME1  `head -$NLINE $FILE | tail -1 | cut -c1-12` ; echo $STOPTIME1
+setenv STOPTIME2  `head -$NLINE $FILE | tail -1 | cut -c14-24`; echo $STOPTIME2
+
+echo " "
+echo "Start time: $STARTTIME1 $STARTTIME2"
+echo "Stop  time: $STOPTIME1 $STOPTIME2 NLINE is $NLINE"
+
+if ($VAR == "S8A" || $VAR == "TPW") then # Allow persistence to be plotted
+    setenv NMEMBERS `cat                 $MEMBERS_FILE | wc -l | cut -c1-2`
+else
+    setenv NMEMBERS `grep -v persistence $MEMBERS_FILE | wc -l | cut -c1-2`
+endif
+echo "NMEMBERS: $NMEMBERS"
+
+# Construct gnuplot .gp file
+setenv GNUPLOTFILE $LAPS_DATA_ROOT/lapsprd/verif/$VAR/$SUBDIR/$VAR_LC\_$TYPE\_fcst.gp
+setenv PNGDIR      $LAPS_DATA_ROOT/lapsprd/verif/$VAR/$SUBDIR/
+setenv PNGFILE     $VAR_LC\_$TYPE\_fcst\_$MODELTIME.png
+setenv DQUOTE \"
+echo 'set terminal png '$TERM_FONT' size 1500,1000'                           > $GNUPLOTFILE
+if ($SUBTYPE == "") then 
+    echo 'set xdata time'                                                    >> $GNUPLOTFILE
+    echo 'set timefmt "%d-%b-%Y %H:%M:%S"'                                   >> $GNUPLOTFILE
+    if ($VERIF_FCST_LEN >= 86400) then
+        echo 'set format x "%d/%H"'                                          >> $GNUPLOTFILE
+    else
+        echo 'set format x "%H:%M"'                                          >> $GNUPLOTFILE
+    endif
+endif
+echo 'set output '$DQUOTE$PNGDIR$PNGFILE$DQUOTE                          >> $GNUPLOTFILE
+#echo 'set termoption dash'                                               >> $GNUPLOTFILE
+
+# time range must be in same format as data file
+#echo 'set xrange ["2-FEB-2011 12:00:00.00":"2-FEB-2011 18:00:00.00"]'    >> $GNUPLOTFILE
+if ($SUBTYPE == "") then 
+    echo 'set xrange ['$DQUOTE$STARTTIME1' '$STARTTIME2$DQUOTE':'$DQUOTE$STOPTIME1' '$STOPTIME2$DQUOTE']' >> $GNUPLOTFILE
+else
+    echo 'set xrange [00:'$VERIF_FCST_LEN_HH']'                          >> $GNUPLOTFILE
+endif
+#echo 'set yrange [0:'$YRANGE']'                                           >> $GNUPLOTFILE
+if ($VAR == "S8A") then                                       
+    echo 'set yrange  [100:350]'                                         >> $GNUPLOTFILE
+    echo 'set ytics (250,300,350)'                                       >> $GNUPLOTFILE
+#   echo 'set ytics nomirror'                                            >> $GNUPLOTFILE
+    echo 'set y2range [0:100]'                                           >> $GNUPLOTFILE
+    echo 'set y2tics (0,20,40,60,80,100)'                                >> $GNUPLOTFILE
+    echo 'set y2label "RMSE" ' $MEMBER_FONT textcolor lt 3               >> $GNUPLOTFILE
+    echo 'set grid xtics y2tics'                                         >> $GNUPLOTFILE
+
+else if ($VAR == "RTO" || $VAR == "R01" || $VAR == "R03" || $VAR == "R06" || $VAR == "R24") then
+    echo 'set yrange ['$YRANGE']'                                        >> $GNUPLOTFILE
+    echo 'set y2range ['$YRANGE']'                                       >> $GNUPLOTFILE
+    echo 'set logscale y'                                                >> $GNUPLOTFILE
+    echo 'set logscale y2'                                               >> $GNUPLOTFILE
+
+else
+    echo 'set yrange ['$YRANGE']'                                        >> $GNUPLOTFILE
+    if ($Y2RANGE != same && $Y2RANGE != $YRANGE) then
+        echo 'set y2range ['$Y2RANGE']'                                  >> $GNUPLOTFILE
+        echo 'set y2tics border'                                         >> $GNUPLOTFILE
+        echo 'set y2label "RMSE" ' $MEMBER_FONT textcolor lt 3           >> $GNUPLOTFILE
+    else
+        echo 'set y2range ['$YRANGE']'                                   >> $GNUPLOTFILE
+    endif
+endif
+echo 'set grid'                                                           >> $GNUPLOTFILE
+echo 'set datafile missing "-99.900"'                                     >> $GNUPLOTFILE
+if ($DURATION == "") then
+    echo 'set xlabel "Initialized '$MODEL_ASCIITIME' UTC"' $MEMBER_FONT textcolor lt 2       >> $GNUPLOTFILE 
+else
+#   echo 'set xlabel "Ending on '$MODEL_ASCIITIME' UTC"' $MEMBER_FONT textcolor lt 2       >> $GNUPLOTFILE 
+    echo 'set xlabel "Forecast Hours - Latest Run At '$MODEL_ASCIITIME' UTC"' $MEMBER_FONT textcolor lt 2       >> $GNUPLOTFILE 
+endif
+echo 'set ylabel "'$7 \($8\)' "' $MEMBER_FONT textcolor lt 2              >> $GNUPLOTFILE
+echo 'set title "'$7' Observed vs Forecast '$DURATION'('$DOMAIN_NAME' domain)" '$TITLE_FONT  >> $GNUPLOTFILE
+echo 'set key ins'                                                       >> $GNUPLOTFILE
+if ($VAR == "S8A_DUMMY") then
+    echo 'set key box'                                                        >> $GNUPLOTFILE
+    echo 'set key graph '$XKEY', first 260'                                   >> $GNUPLOTFILE
+else
+    echo 'set key left box'                                                   >> $GNUPLOTFILE
+endif
+echo 'set key spacing' $KEY_SPACING                                                                    >> $GNUPLOTFILE
+echo 'set key height' $KEY_HEIGHT                                                                      >> $GNUPLOTFILE
+
+if ($VAR == "WSF" || $VAR == "W3") then
+    setenv NFIELDS 1
+
+    setenv T1 "RMSE Vector"    
+
+    echo 'set key width' $KEY_WIDTH                                                                    >> $GNUPLOTFILE
+
+else if ($VAR == "T3") then
+    setenv NFIELDS 2
+
+    setenv T1 "Bias (F-O)"
+    setenv T3 "RMS (F-O)"
+
+    echo 'set key width' $KEY_WIDTH                                                                    >> $GNUPLOTFILE
+
+else
+    setenv NFIELDS 3
+
+    setenv T1 "Fcst Mean"
+    setenv T2 "Obs Mean"
+    setenv T3 "RMS (F-O)"
+
+    echo 'set key width' $KEY_WIDTH                                                                    >> $GNUPLOTFILE
+endif
+
+setenv IMEMBER 1
+while ($IMEMBER <= $NMEMBERS)
+    @ IBLOCK = $IMEMBER - 1
+
+    @ PT = $IMEMBER + 4
+
+    if ($PT == 7) then
+        @ PT = 4
+    endif
+
+    setenv MEMBER `head -$IMEMBER $MEMBERS_FILE | tail -1`
+
+    if ($SUMMARY_FILE != /dev/null && -e $SUMMARY_FILE) then # Percentage will be present
+        setenv PCT `head -$IMEMBER $SUMMARY_FILE | tail -1`
+        setenv TITLE "`echo $MEMBER | sed 's/_/ /g'` $PCT_SUCCESS/$PCT%"
+
+        echo "PCT_SUCCESS being compared to threshold of 80 is: $PCT_SUCCESS"
+        if ($PCT_SUCCESS >= 80) then
+            if (-d /w3/lapb) then
+                setenv LW 2
+            else
+                if ($NMEMBERS >= 7) then
+                    setenv LW 1
+                else
+                    setenv LW 2
+                endif
+            endif
+        else 
+            setenv LW 1
+        endif
+
+    else                                                     # Percentage not present
+        setenv PCT ""
+        setenv TITLE `echo $MEMBER | sed 's/_/ /g'`
+        if (-d /w3/lapb) then
+            setenv LW 2
+        else
+            if ($NMEMBERS >= 7) then
+                setenv LW 1
+            else
+                setenv LW 2
+            endif
+        endif
+
+    endif
+
+    echo "IMEMBER MEMBER IBLOCK TITLE: $IMEMBER $MEMBER $IBLOCK $TITLE"
+
+    if ($MEMBER == "advection") then
+        setenv LW 1
+    endif
+
+    echo "LW $LW"
+
+    if ($DURATION == "") then 
+        setenv TIME 1
+    else
+        setenv TIME \(\$1+\$2/60\)
+    endif
+
+    if ($NFIELDS == 3) then
+
+        setenv PS 1.5
+
+        if ($IMEMBER > 18) then
+            setenv LT 3
+            setenv LCF 7
+        else if ($IMEMBER > 9) then
+            setenv LT 2
+            setenv LCF 4
+        else
+            setenv LT 1
+            setenv LCF 1
+        endif
+
+        echo "IMEMBER LT LCF: $IMEMBER $LT $LCF"
+
+        if ($NMEMBERS == 1) then
+            echo 'plot '$DQUOTE$FILE$DQUOTE' index '$IBLOCK' using '$TIME':3 axis x1y1 title "'"$TH"$T1 $TITLE$TF'" with linespoints lw '$LW' pt '$PT' ps '$PS' lt '$LT' , \' >> $GNUPLOTFILE
+            echo        $DQUOTE$FILE$DQUOTE' index '$IBLOCK' using '$TIME':4 axis x1y1 title "'"$TH"$T2 $TITLE$TF'" with linespoints lw '$LW' pt '$PT' ps '$PS' lt     2 , \' >> $GNUPLOTFILE
+            echo        $DQUOTE$FILE$DQUOTE' index '$IBLOCK' using '$TIME':5 axis x1y2 title "'"$TH"$T3 $TITLE$TF'" with linespoints lw '$LW' pt '$PT' ps '$PS' lt     3 '    >> $GNUPLOTFILE
+        else if ($IMEMBER == 1) then
+            echo 'plot '$DQUOTE$FILE$DQUOTE' index '$IBLOCK' using '$TIME':3 axis x1y1 title "'"$TH"$T1 $TITLE$TF'" with linespoints lw '$LW' pt '$PT' ps '$PS' lt '$LT' , \' >> $GNUPLOTFILE
+            echo        $DQUOTE$FILE$DQUOTE' index '$IBLOCK' using '$TIME':4 axis x1y1 title "'"$TH"$T2 $TITLE$TF'" with linespoints lw '$LW' pt '$PT' ps '$PS' lt     2 , \' >> $GNUPLOTFILE
+            echo        $DQUOTE$FILE$DQUOTE' index '$IBLOCK' using '$TIME':5 axis x1y2 title "'"$TH"$T3 $TITLE$TF'" with linespoints lw '$LW' pt '$PT' ps '$PS' lt     3 , \' >> $GNUPLOTFILE
+        else if ($IMEMBER == $NMEMBERS) then
+            echo '     '$DQUOTE$FILE$DQUOTE' index '$IBLOCK' using '$TIME':3 axis x1y1 title "'"$TH"$T1 $TITLE$TF'" with linespoints lw '$LW' pt '$PT' ps '$PS' lt '$LT' , \' >> $GNUPLOTFILE
+            echo        $DQUOTE$FILE$DQUOTE' index '$IBLOCK' using '$TIME':5 axis x1y2 title "'"$TH"$T3 $TITLE$TF'" with linespoints lw '$LW' pt '$PT' ps '$PS' lt     3 '    >> $GNUPLOTFILE
+        else
+            echo '     '$DQUOTE$FILE$DQUOTE' index '$IBLOCK' using '$TIME':3 axis x1y1 title "'"$TH"$T1 $TITLE$TF'" with linespoints lw '$LW' pt '$PT' ps '$PS' lt '$LT' , \' >> $GNUPLOTFILE
+            echo        $DQUOTE$FILE$DQUOTE' index '$IBLOCK' using '$TIME':5 axis x1y2 title "'"$TH"$T3 $TITLE$TF'" with linespoints lw '$LW' pt '$PT' ps '$PS' lt     3 , \' >> $GNUPLOTFILE
+        endif
+
+    else if ($NFIELDS == 2) then
+
+        setenv PS 1.5
+
+        if ($NMEMBERS == 1) then
+            echo 'plot '$DQUOTE$FILE$DQUOTE' index '$IBLOCK' using '$TIME':($3-$4) title "'"$TH"$T1 $TITLE$TF'" with linespoints lw '$LW' pt '$PT' ps '$PS' lt 1, \' >> $GNUPLOTFILE
+            echo        $DQUOTE$FILE$DQUOTE' index '$IBLOCK' using '$TIME':5       title "'"$TH"$T3 $TITLE$TF'" with linespoints lw '$LW' pt '$PT' ps '$PS' lt 3'    >> $GNUPLOTFILE
+        else if ($IMEMBER == 1) then
+            echo 'plot '$DQUOTE$FILE$DQUOTE' index '$IBLOCK' using '$TIME':($3-$4) title "'"$TH"$T1 $TITLE$TF'" with linespoints lw '$LW' pt '$PT' ps '$PS' lt 1, \' >> $GNUPLOTFILE
+            echo        $DQUOTE$FILE$DQUOTE' index '$IBLOCK' using '$TIME':5       title "'"$TH"$T3 $TITLE$TF'" with linespoints lw '$LW' pt '$PT' ps '$PS' lt 3, \' >> $GNUPLOTFILE
+        else if ($IMEMBER == $NMEMBERS) then
+            echo '     '$DQUOTE$FILE$DQUOTE' index '$IBLOCK' using '$TIME':($3-$4) title "'"$TH"$T1 $TITLE$TF'" with linespoints lw '$LW' pt '$PT' ps '$PS' lt 1, \' >> $GNUPLOTFILE
+            echo        $DQUOTE$FILE$DQUOTE' index '$IBLOCK' using '$TIME':5       title "'"$TH"$T3 $TITLE$TF'" with linespoints lw '$LW' pt '$PT' ps '$PS' lt 3'    >> $GNUPLOTFILE
+        else
+            echo '     '$DQUOTE$FILE$DQUOTE' index '$IBLOCK' using '$TIME':($3-$4) title "'"$TH"$T1 $TITLE$TF'" with linespoints lw '$LW' pt '$PT' ps '$PS' lt 1, \' >> $GNUPLOTFILE
+            echo        $DQUOTE$FILE$DQUOTE' index '$IBLOCK' using '$TIME':5       title "'"$TH"$T3 $TITLE$TF'" with linespoints lw '$LW' pt '$PT' ps '$PS' lt 3, \' >> $GNUPLOTFILE
+        endif
+
+    else # NFIELDS = 1
+
+        if ($NMEMBERS == 1) then
+            echo 'plot '$DQUOTE$FILE$DQUOTE' index '$IBLOCK' using '$TIME':3 title "'"$TH"$T1 $TITLE$TF'" with linespoints lw '$LW' pt 5 ps 1 lt '$IMEMBER      >> $GNUPLOTFILE
+        else if ($IMEMBER == 1) then
+            echo 'plot '$DQUOTE$FILE$DQUOTE' index '$IBLOCK' using '$TIME':3 title "'"$TH"$T1 $TITLE$TF'" with linespoints lw '$LW' pt 5 ps 1 lt '$IMEMBER', \' >> $GNUPLOTFILE
+        else if ($IMEMBER == $NMEMBERS) then
+            echo '     '$DQUOTE$FILE$DQUOTE' index '$IBLOCK' using '$TIME':3 title "'"$TH"$T1 $TITLE$TF'" with linespoints lw '$LW' pt 5 ps 1 lt '$IMEMBER      >> $GNUPLOTFILE
+
+        else
+            echo '     '$DQUOTE$FILE$DQUOTE' index '$IBLOCK' using '$TIME':3 title "'"$TH"$T1 $TITLE$TF'" with linespoints lw '$LW' pt 5 ps 1 lt '$IMEMBER', \' >> $GNUPLOTFILE
+        endif
+
+    endif
+
+    @ IMEMBER = $IMEMBER + 1
+end
+
+# Run gnuplot
+gnuplot < $GNUPLOTFILE
+
+echo " "
+echo "outputs..."
+ls -l $GNUPLOTFILE
+cd $PNGDIR
+ls -l $PNGDIR/$PNGFILE                          
+
+if ($L_PLOT_CRITERIA == "F") then
+    echo "exiting to skip links, thumbnail, and potential animation sections - plot criteria flag is false"
+    exit
+endif
+
+rm -f          $VAR_LC\_$TYPE\_fcst.png
+ln -s $PNGFILE $VAR_LC\_$TYPE\_fcst.png
+
+rm -f          $VAR_LC\_$TYPE\_fcst\_$MODELTIME_HHMM.png
+ln -s $PNGFILE $VAR_LC\_$TYPE\_fcst\_$MODELTIME_HHMM.png
+
+convert -resize 105x70! $PNGFILE $VAR_LC\_$TYPE\_fcst\_$MODELTIME_HHMM\_thumb.png
+
